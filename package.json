@@ -1,0 +1,15 @@
+{
+  "name": "travel-footprint-map",
+  "version": "1.0.0",
+  "description": "旅行足迹地图 - 记录我去过的地方",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.7.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.0"
+  }
+}

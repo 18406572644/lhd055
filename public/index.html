@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>我去过的地方 · 旅行足迹地图</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif&family=Source+Serif+4:opsz,wght@8..60,300;8..60,400;8..60,600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="map"></div>
+
+  <div id="stats-panel">
+    <h2>旅行统计</h2>
+    <div class="stat-item">
+      <span class="stat-value" id="stat-total">0</span>
+      <span class="stat-label">足迹总数</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-value" id="stat-cities">0</span>
+      <span class="stat-label">到访城市</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-value" id="stat-month">暂无</span>
+      <span class="stat-label">最爱的月份</span>
+    </div>
+  </div>
+
+  <button id="timeline-toggle" title="足迹时间线">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <line x1="3" y1="4" x2="21" y2="4"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="20" x2="21" y2="20"/>
+      <circle cx="8" cy="4" r="2" fill="currentColor"/><circle cx="16" cy="12" r="2" fill="currentColor"/><circle cx="10" cy="20" r="2" fill="currentColor"/>
+    </svg>
+  </button>
+
+  <div id="timeline-drawer" class="closed">
+    <div class="drawer-header">
+      <h2>足迹时间线</h2>
+      <button id="timeline-close">&times;</button>
+    </div>
+    <div id="timeline-list"></div>
+  </div>
+
+  <div id="add-modal" class="hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content">
+      <h3>添加足迹</h3>
+      <form id="add-form">
+        <div class="form-group">
+          <label for="fp-name">地点名称</label>
+          <input type="text" id="fp-name" required placeholder="例如：京都岚山">
+        </div>
+        <div class="form-group">
+          <label for="fp-date">到访日期</label>
+          <input type="date" id="fp-date" required>
+        </div>
+        <div class="form-group">
+          <label for="fp-feeling">一句话感受</label>
+          <input type="text" id="fp-feeling" placeholder="写下你的感受...">
+        </div>
+        <div class="form-group">
+          <label>心情评分</label>
+          <div class="star-rating" id="star-rating">
+            <span data-value="1">★</span>
+            <span data-value="2">★</span>
+            <span data-value="3">★</span>
+            <span data-value="4">★</span>
+            <span data-value="5">★</span>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button type="button" id="add-cancel" class="btn-cancel">取消</button>
+          <button type="submit" class="btn-submit">添加足迹</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="detail-popup" class="hidden">
+    <button id="detail-close">&times;</button>
+    <h3 id="detail-name"></h3>
+    <div class="detail-row">
+      <span class="detail-icon">📅</span>
+      <span id="detail-date"></span>
+    </div>
+    <div class="detail-row">
+      <span class="detail-icon">💬</span>
+      <span id="detail-feeling"></span>
+    </div>
+    <div class="detail-row">
+      <span class="detail-icon">⭐</span>
+      <span id="detail-mood"></span>
+    </div>
+    <button id="detail-delete" class="btn-delete">删除此足迹</button>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
