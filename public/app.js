@@ -20,6 +20,10 @@
   let currentMood = 3;
   let pendingLatLng = null;
   let currentDetailId = null;
+  let footprintsCache = [];
+  let pendingFiles = [];
+  let lightboxImages = [];
+  let lightboxIndex = 0;
 
   function init() {
     initMap();
@@ -55,6 +59,8 @@
     document.getElementById('fp-name').value = '';
     document.getElementById('fp-date').value = new Date().toISOString().split('T')[0];
     document.getElementById('fp-feeling').value = '';
+    pendingFiles = [];
+    renderUploadPreview();
     setMoodRating(3);
     document.getElementById('fp-name').focus();
   }
@@ -62,6 +68,8 @@
   function closeAddModal() {
     document.getElementById('add-modal').classList.add('hidden');
     pendingLatLng = null;
+    pendingFiles = [];
+    document.getElementById('image-input').value = '';
   }
 
   function setMoodRating(value) {
@@ -113,7 +121,116 @@
       if (e.key === 'Escape') {
         closeAddModal();
         closeDetailPopup();
+        closeLightbox();
+      } else if (e.key === 'ArrowLeft') {
+        lightboxPrev();
+      } else if (e.key === 'ArrowRight') {
+        lightboxNext();
       }
+    });
+
+    setupUploadArea('upload-area', 'image-input', function (files) {
+      pendingFiles = pendingFiles.concat(Array.from(files));
+      renderUploadPreview();
+    });
+
+    setupUploadArea('detail-upload-area', 'detail-image-input', function (files) {
+      if (currentDetailId != null) {
+        uploadImages(currentDetailId, Array.from(files)).then(function () {
+          refreshDetailImages();
+          loadTimeline();
+        });
+      }
+    });
+
+    document.getElementById('lightbox-close').addEventListener('click', closeLightbox);
+    document.getElementById('lightbox-prev').addEventListener('click', lightboxPrev);
+    document.getElementById('lightbox-next').addEventListener('click', lightboxNext);
+    document.getElementById('lightbox-delete').addEventListener('click', function () {
+      deleteCurrentLightboxImage();
+    });
+
+    document.getElementById('lightbox').addEventListener('click', function (e) {
+      if (e.target.id === 'lightbox') {
+        closeLightbox();
+      }
+    });
+  }
+
+  function setupUploadArea(areaId, inputId, onFiles) {
+    var area = document.getElementById(areaId);
+    var input = document.getElementById(inputId);
+    if (!area || !input) return;
+
+    area.addEventListener('click', function (e) {
+      if (e.target.closest('.preview-remove')) return;
+      input.click();
+    });
+
+    input.addEventListener('change', function (e) {
+      if (e.target.files && e.target.files.length > 0) {
+        onFiles(e.target.files);
+        input.value = '';
+      }
+    });
+
+    ['dragenter', 'dragover'].forEach(function (evt) {
+      area.addEventListener(evt, function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        area.classList.add('dragover');
+      });
+    });
+
+    ['dragleave', 'drop'].forEach(function (evt) {
+      area.addEventListener(evt, function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        area.classList.remove('dragover');
+      });
+    });
+
+    area.addEventListener('drop', function (e) {
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        var imgFiles = Array.from(e.dataTransfer.files).filter(function (f) {
+          return f.type.startsWith('image/');
+        });
+        if (imgFiles.length > 0) {
+          onFiles(imgFiles);
+        }
+      }
+    });
+  }
+
+  function renderUploadPreview() {
+    var container = document.getElementById('upload-preview');
+    var hint = document.querySelector('#upload-area .upload-hint');
+    if (!container) return;
+
+    if (pendingFiles.length === 0) {
+      container.innerHTML = '';
+      if (hint) hint.style.display = '';
+      return;
+    }
+    if (hint) hint.style.display = 'none';
+
+    var html = '';
+    pendingFiles.forEach(function (file, idx) {
+      var url = URL.createObjectURL(file);
+      html += '<div class="preview-item">' +
+        '<img src="' + url + '" alt="preview" loading="lazy">' +
+        '<button type="button" class="preview-remove" data-idx="' + idx + '">&times;</button>' +
+        '</div>';
+    });
+    container.innerHTML = html;
+
+    container.querySelectorAll('.preview-remove').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var idx = parseInt(btn.getAttribute('data-idx'), 10);
+        pendingFiles.splice(idx, 1);
+        renderUploadPreview();
+      });
     });
   }
 
@@ -142,6 +259,16 @@
       .then(function (fp) {
         closeAddModal();
         addMarkerToMap(fp);
+        if (pendingFiles.length > 0) {
+          var files = pendingFiles.slice();
+          pendingFiles = [];
+          uploadImages(fp.id, files).then(function (savedImages) {
+            fp.images = savedImages || [];
+            updateFootprintCache(fp);
+            addMarkerToMap(fp);
+            loadTimeline();
+          });
+        }
         loadTimeline();
         loadStats();
       })
@@ -150,7 +277,38 @@
       });
   }
 
+  function uploadImages(footprintId, files) {
+    var formData = new FormData();
+    files.forEach(function (file) {
+      formData.append('images', file);
+    });
+    return fetch('/api/footprints/' + footprintId + '/images', {
+      method: 'POST',
+      body: formData
+    })
+      .then(function (res) {
+        if (!res.ok) throw new Error('Upload failed');
+        return res.json();
+      })
+      .catch(function (err) {
+        console.error('Failed to upload images:', err);
+        return [];
+      });
+  }
+
+  function updateFootprintCache(fp) {
+    var idx = footprintsCache.findIndex(function (f) { return f.id === fp.id; });
+    if (idx >= 0) {
+      footprintsCache[idx] = fp;
+    } else {
+      footprintsCache.push(fp);
+    }
+  }
+
   function addMarkerToMap(fp) {
+    if (markers[fp.id]) {
+      map.removeLayer(markers[fp.id]);
+    }
     var color = MOOD_COLORS[fp.mood] || MOOD_COLORS[3];
     var size = 16;
 
@@ -193,12 +351,16 @@
     }
     moodEl.textContent = stars + ' ' + (MOOD_LABELS[fp.mood] || '');
 
+    renderDetailGallery(fp.images || []);
+
+    document.querySelector('.detail-upload').classList.remove('hidden');
+
     var popup = document.getElementById('detail-popup');
     popup.classList.remove('hidden');
 
     var point = map.latLngToContainerPoint([fp.lat, fp.lng]);
-    var popupWidth = 280;
-    var popupHeight = 220;
+    var popupWidth = 320;
+    var popupHeight = 420;
 
     var left = point.x + 20;
     var top = point.y - popupHeight / 2;
@@ -215,8 +377,50 @@
     popup.style.top = top + 'px';
   }
 
+  function renderDetailGallery(images) {
+    var gallery = document.getElementById('detail-gallery');
+    if (!images || images.length === 0) {
+      gallery.classList.add('hidden');
+      gallery.innerHTML = '';
+      return;
+    }
+    gallery.classList.remove('hidden');
+    var html = '';
+    images.forEach(function (img, idx) {
+      var thumb = imageUrl(img, 'thumb');
+      html += '<div class="gallery-item" data-idx="' + idx + '">' +
+        '<img data-src="' + thumb + '" alt="" loading="lazy" class="lazy-img">' +
+        '</div>';
+    });
+    gallery.innerHTML = html;
+    gallery.querySelectorAll('.gallery-item').forEach(function (item) {
+      item.addEventListener('click', function () {
+        var idx = parseInt(item.getAttribute('data-idx'), 10);
+        openLightbox(images, idx);
+      });
+    });
+    lazyLoadImages();
+  }
+
+  function refreshDetailImages() {
+    if (currentDetailId == null) return;
+    fetch('/api/footprints/' + currentDetailId + '/images')
+      .then(function (res) { return res.json(); })
+      .then(function (images) {
+        renderDetailGallery(images);
+        var fp = getFootprintLocal(currentDetailId);
+        if (fp) {
+          fp.images = images;
+        }
+      })
+      .catch(function (err) {
+        console.error(err);
+      });
+  }
+
   function closeDetailPopup() {
     document.getElementById('detail-popup').classList.add('hidden');
+    document.querySelector('.detail-upload').classList.add('hidden');
     currentDetailId = null;
   }
 
@@ -240,10 +444,124 @@
       });
   }
 
+  function openLightbox(images, startIdx) {
+    lightboxImages = images || [];
+    lightboxIndex = startIdx || 0;
+    if (lightboxImages.length === 0) return;
+    var img = lightboxImages[lightboxIndex];
+    var url = imageUrl(img, 'medium');
+    document.getElementById('lightbox-img').src = url;
+    document.getElementById('lightbox').classList.remove('hidden');
+    updateLightboxNav();
+  }
+
+  function closeLightbox() {
+    document.getElementById('lightbox').classList.add('hidden');
+    document.getElementById('lightbox-img').src = '';
+    lightboxImages = [];
+    lightboxIndex = 0;
+  }
+
+  function updateLightboxNav() {
+    var prev = document.querySelector('.lightbox-prev');
+    var next = document.querySelector('.lightbox-next');
+    prev.style.display = lightboxIndex > 0 ? '' : 'none';
+    next.style.display = lightboxIndex < lightboxImages.length - 1 ? '' : 'none';
+  }
+
+  function lightboxPrev() {
+    if (lightboxIndex <= 0 || lightboxImages.length === 0) return;
+    lightboxIndex--;
+    var img = lightboxImages[lightboxIndex];
+    document.getElementById('lightbox-img').src = imageUrl(img, 'medium');
+    updateLightboxNav();
+  }
+
+  function lightboxNext() {
+    if (lightboxIndex >= lightboxImages.length - 1 || lightboxImages.length === 0) return;
+    lightboxIndex++;
+    var img = lightboxImages[lightboxIndex];
+    document.getElementById('lightbox-img').src = imageUrl(img, 'medium');
+    updateLightboxNav();
+  }
+
+  function deleteCurrentLightboxImage() {
+    if (currentDetailId == null || lightboxImages.length === 0) return;
+    var img = lightboxImages[lightboxIndex];
+    if (!img) return;
+    if (!confirm('确定要删除这张图片吗？')) return;
+
+    fetch('/api/footprints/' + currentDetailId + '/images/' + img.id, {
+      method: 'DELETE'
+    })
+      .then(function (res) {
+        if (!res.ok) throw new Error('Delete failed');
+        return res.json();
+      })
+      .then(function () {
+        closeLightbox();
+        refreshDetailImages();
+        loadTimeline();
+      })
+      .catch(function (err) {
+        console.error(err);
+      });
+  }
+
+  function imageUrl(img, size) {
+    if (!img) return '';
+    if (size === 'thumb' && img.thumb_path) {
+      return toWebPath(img.thumb_path);
+    }
+    if (size === 'medium' && img.medium_path) {
+      return toWebPath(img.medium_path);
+    }
+    if (img.path) return toWebPath(img.path);
+    return '';
+  }
+
+  function toWebPath(fsPath) {
+    if (!fsPath) return '';
+    var idx = fsPath.indexOf('uploads');
+    if (idx < 0) return '';
+    return '/' + fsPath.slice(idx).replace(/\\/g, '/');
+  }
+
+  function lazyLoadImages() {
+    var images = document.querySelectorAll('img.lazy-img');
+    if (!('IntersectionObserver' in window)) {
+      images.forEach(function (img) {
+        if (img.getAttribute('data-src')) {
+          img.src = img.getAttribute('data-src');
+          img.removeAttribute('data-src');
+        }
+      });
+      return;
+    }
+    var observer = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) {
+          var img = entry.target;
+          if (img.getAttribute('data-src')) {
+            img.src = img.getAttribute('data-src');
+            img.removeAttribute('data-src');
+          }
+          observer.unobserve(img);
+        }
+      });
+    }, { rootMargin: '100px' });
+    images.forEach(function (img) {
+      if (img.getAttribute('data-src')) {
+        observer.observe(img);
+      }
+    });
+  }
+
   function loadFootprints() {
     fetch('/api/footprints')
       .then(function (res) { return res.json(); })
       .then(function (footprints) {
+        footprintsCache = footprints;
         footprints.forEach(function (fp) {
           addMarkerToMap(fp);
         });
@@ -259,6 +577,7 @@
     fetch('/api/footprints')
       .then(function (res) { return res.json(); })
       .then(function (footprints) {
+        footprintsCache = footprints;
         renderTimeline(footprints);
       })
       .catch(function (err) {
@@ -290,6 +609,16 @@
         stars += i <= fp.mood ? '★' : '☆';
       }
 
+      var thumbHtml = '';
+      if (fp.images && fp.images.length > 0) {
+        var first = fp.images[0];
+        var thumb = imageUrl(first, 'thumb');
+        thumbHtml = '<div class="timeline-thumb">' +
+          '<img data-src="' + thumb + '" alt="" loading="lazy" class="lazy-img">' +
+          (fp.images.length > 1 ? '<span class="timeline-thumb-count">+' + (fp.images.length - 1) + '</span>' : '') +
+          '</div>';
+      }
+
       html += '<div class="timeline-item" data-id="' + fp.id + '">' +
         '<div class="timeline-date">' +
         '<div class="month">' + month + '</div>' +
@@ -297,6 +626,7 @@
         '</div>' +
         '<div class="timeline-dot" style="background:' + color + ';color:' + color + ';"></div>' +
         '<div class="timeline-content">' +
+        thumbHtml +
         '<h4>' + escapeHtml(fp.name) + '</h4>' +
         '<p>' + escapeHtml(fp.feeling || '未记录感受') + '</p>' +
         '<div class="mood-stars" style="color:' + color + ';">' + stars + '</div>' +
@@ -313,31 +643,19 @@
           var latlng = markers[id].getLatLng();
           map.setView(latlng, 12, { animate: true });
           setTimeout(function () {
-            showDetailPopup(getFootprintLocal(id), markers[id]);
+            var fp = getFootprintLocal(id);
+            if (fp) showDetailPopup(fp, markers[id]);
           }, 400);
         }
       });
     });
-  }
 
-  var footprintsCache = [];
+    lazyLoadImages();
+  }
 
   function getFootprintLocal(id) {
     return footprintsCache.find(function (fp) { return fp.id === id; }) || null;
   }
-
-  var origLoadTimeline = loadTimeline;
-  loadTimeline = function () {
-    fetch('/api/footprints')
-      .then(function (res) { return res.json(); })
-      .then(function (footprints) {
-        footprintsCache = footprints;
-        renderTimeline(footprints);
-      })
-      .catch(function (err) {
-        console.error('Failed to load timeline:', err);
-      });
-  };
 
   function loadStats() {
     fetch('/api/stats')

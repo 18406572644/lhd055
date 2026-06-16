@@ -18,6 +18,22 @@ db.exec(`
   )
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS footprint_images (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    footprint_id INTEGER NOT NULL,
+    original_name TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    path TEXT NOT NULL,
+    thumb_path TEXT NOT NULL,
+    medium_path TEXT NOT NULL,
+    size INTEGER DEFAULT 0,
+    sort_order INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (footprint_id) REFERENCES footprints(id) ON DELETE CASCADE
+  )
+`);
+
 const stmtGetAll = db.prepare('SELECT * FROM footprints ORDER BY date DESC, created_at DESC');
 const stmtGetById = db.prepare('SELECT * FROM footprints WHERE id = ?');
 const stmtInsert = db.prepare('INSERT INTO footprints (name, date, feeling, mood, lat, lng) VALUES (@name, @date, @feeling, @mood, @lat, @lng)');
@@ -31,6 +47,16 @@ const stmtFavoriteMonth = db.prepare(`
   ORDER BY cnt DESC
   LIMIT 1
 `);
+
+const stmtGetImagesByFootprintId = db.prepare('SELECT * FROM footprint_images WHERE footprint_id = ? ORDER BY sort_order ASC, created_at ASC');
+const stmtGetImageById = db.prepare('SELECT * FROM footprint_images WHERE id = ?');
+const stmtInsertImage = db.prepare(`
+  INSERT INTO footprint_images 
+  (footprint_id, original_name, filename, path, thumb_path, medium_path, size, sort_order)
+  VALUES (@footprint_id, @original_name, @filename, @path, @thumb_path, @medium_path, @size, @sort_order)
+`);
+const stmtDeleteImage = db.prepare('DELETE FROM footprint_images WHERE id = ?');
+const stmtDeleteImagesByFootprintId = db.prepare('DELETE FROM footprint_images WHERE footprint_id = ?');
 
 function getAll() {
   return stmtGetAll.all();
@@ -58,4 +84,28 @@ function getStats() {
   return { total, cities, favoriteMonth };
 }
 
-module.exports = { getAll, getById, create, remove, getStats };
+function getImages(footprintId) {
+  return stmtGetImagesByFootprintId.all(footprintId);
+}
+
+function getImage(id) {
+  return stmtGetImageById.get(id);
+}
+
+function addImage(data) {
+  const result = stmtInsertImage.run(data);
+  return stmtGetImageById.get(result.lastInsertRowid);
+}
+
+function removeImage(id) {
+  return stmtDeleteImage.run(id);
+}
+
+function removeImagesByFootprint(footprintId) {
+  return stmtDeleteImagesByFootprintId.run(footprintId);
+}
+
+module.exports = {
+  getAll, getById, create, remove, getStats,
+  getImages, getImage, addImage, removeImage, removeImagesByFootprint
+};

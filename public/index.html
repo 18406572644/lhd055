@@ -71,6 +71,22 @@
             <span data-value="5">★</span>
           </div>
         </div>
+        <div class="form-group">
+          <label>旅行照片</label>
+          <div id="upload-area" class="upload-area">
+            <input type="file" id="image-input" accept="image/*" multiple hidden>
+            <div class="upload-hint">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+              <p>拖拽图片到此处，或<u>点击选择</u></p>
+              <small>支持 JPG、PNG、GIF、WebP，单张最多 10MB</small>
+            </div>
+            <div id="upload-preview" class="upload-preview"></div>
+          </div>
+        </div>
         <div class="form-actions">
           <button type="button" id="add-cancel" class="btn-cancel">取消</button>
           <button type="submit" class="btn-submit">添加足迹</button>
@@ -82,6 +98,7 @@
   <div id="detail-popup" class="hidden">
     <button id="detail-close">&times;</button>
     <h3 id="detail-name"></h3>
+    <div id="detail-gallery" class="detail-gallery hidden"></div>
     <div class="detail-row">
       <span class="detail-icon">📅</span>
       <span id="detail-date"></span>
@@ -94,7 +111,23 @@
       <span class="detail-icon">⭐</span>
       <span id="detail-mood"></span>
     </div>
+    <div class="detail-upload hidden">
+      <div class="detail-upload-area" id="detail-upload-area">
+        <input type="file" id="detail-image-input" accept="image/*" multiple hidden>
+        <span class="detail-upload-hint">+ 添加图片</span>
+      </div>
+    </div>
     <button id="detail-delete" class="btn-delete">删除此足迹</button>
+  </div>
+
+  <div id="lightbox" class="lightbox hidden">
+    <button class="lightbox-close" id="lightbox-close">&times;</button>
+    <button class="lightbox-prev" id="lightbox-prev">&#10094;</button>
+    <button class="lightbox-next" id="lightbox-next">&#10095;</button>
+    <div class="lightbox-content">
+      <img id="lightbox-img" src="" alt="">
+    </div>
+    <button class="lightbox-delete" id="lightbox-delete">删除图片</button>
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
