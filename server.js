@@ -223,6 +223,166 @@ app.delete('/api/footprints/:id/images/:imageId', (req, res) => {
   }
 });
 
+app.get('/api/trips', (req, res) => {
+  try {
+    const trips = db.getAllTrips();
+    res.json(trips);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/trips/:id', (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const trip = db.getTripById(id);
+    if (!trip) {
+      return res.status(404).json({ error: 'Trip not found' });
+    }
+    trip.footprints = db.getTripFootprints(id);
+    trip.stats = db.getTripStats(id);
+    res.json(trip);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/trips', (req, res) => {
+  try {
+    const { name, description, start_date, end_date, cover_image } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'name is required' });
+    }
+    const trip = db.createTrip({
+      name: name.trim(),
+      description: description || '',
+      start_date: start_date || null,
+      end_date: end_date || null,
+      cover_image: cover_image || null
+    });
+    trip.footprints = [];
+    trip.stats = db.getTripStats(trip.id);
+    res.status(201).json(trip);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/trips/:id', (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const trip = db.updateTrip(id, req.body);
+    if (!trip) {
+      return res.status(404).json({ error: 'Trip not found' });
+    }
+    trip.footprints = db.getTripFootprints(id);
+    trip.stats = db.getTripStats(id);
+    res.json(trip);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/trips/:id', (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const result = db.deleteTrip(id);
+    if (result.changes === 0) {
+      return res.status(404).json({ error: 'Trip not found' });
+    }
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/trips/:id/footprints', (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!db.getTripById(id)) {
+      return res.status(404).json({ error: 'Trip not found' });
+    }
+    const footprints = db.getTripFootprints(id);
+    res.json(footprints);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/trips/:id/footprints/:footprintId', (req, res) => {
+  try {
+    const tripId = parseInt(req.params.id, 10);
+    const footprintId = parseInt(req.params.footprintId, 10);
+    if (!db.getTripById(tripId)) {
+      return res.status(404).json({ error: 'Trip not found' });
+    }
+    if (!db.getById(footprintId)) {
+      return res.status(404).json({ error: 'Footprint not found' });
+    }
+    const added = db.addFootprintToTrip(tripId, footprintId);
+    res.json({ success: added });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/trips/:id/footprints/:footprintId', (req, res) => {
+  try {
+    const tripId = parseInt(req.params.id, 10);
+    const footprintId = parseInt(req.params.footprintId, 10);
+    if (!db.getTripById(tripId)) {
+      return res.status(404).json({ error: 'Trip not found' });
+    }
+    const removed = db.removeFootprintFromTrip(tripId, footprintId);
+    res.json({ success: removed });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/trips/:id/stats', (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!db.getTripById(id)) {
+      return res.status(404).json({ error: 'Trip not found' });
+    }
+    const stats = db.getTripStats(id);
+    res.json(stats);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/trips/:id/gpx', (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const trip = db.getTripById(id);
+    if (!trip) {
+      return res.status(404).json({ error: 'Trip not found' });
+    }
+    const gpx = db.generateGPX(id);
+    const filename = (trip.name || 'trip').replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_') + '.gpx';
+    res.setHeader('Content-Type', 'application/gpx+xml');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(gpx);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/footprints/:id/trips', (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!db.getById(id)) {
+      return res.status(404).json({ error: 'Footprint not found' });
+    }
+    const trips = db.getTripsByFootprintId(id);
+    res.json(trips);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(500).json({ error: err.message });

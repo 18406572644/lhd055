@@ -34,6 +34,31 @@ db.exec(`
   )
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS trips (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    start_date TEXT,
+    end_date TEXT,
+    cover_image TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS trip_footprints (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    trip_id INTEGER NOT NULL,
+    footprint_id INTEGER NOT NULL,
+    sort_order INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE,
+    FOREIGN KEY (footprint_id) REFERENCES footprints(id) ON DELETE CASCADE,
+    UNIQUE(trip_id, footprint_id)
+  )
+`);
+
 const stmtGetAll = db.prepare('SELECT * FROM footprints ORDER BY date DESC, created_at DESC');
 const stmtGetById = db.prepare('SELECT * FROM footprints WHERE id = ?');
 const stmtInsert = db.prepare('INSERT INTO footprints (name, date, feeling, mood, lat, lng) VALUES (@name, @date, @feeling, @mood, @lat, @lng)');
@@ -70,6 +95,32 @@ const stmtYearlyData = db.prepare(`
   WHERE strftime('%Y', date) IN (?, ?)
   GROUP BY year
   ORDER BY year DESC
+`);
+
+const stmtGetAllTrips = db.prepare('SELECT * FROM trips ORDER BY start_date DESC, created_at DESC');
+const stmtGetTripById = db.prepare('SELECT * FROM trips WHERE id = ?');
+const stmtInsertTrip = db.prepare('INSERT INTO trips (name, description, start_date, end_date, cover_image) VALUES (@name, @description, @start_date, @end_date, @cover_image)');
+const stmtUpdateTrip = db.prepare('UPDATE trips SET name = @name, description = @description, start_date = @start_date, end_date = @end_date, cover_image = @cover_image WHERE id = @id');
+const stmtDeleteTrip = db.prepare('DELETE FROM trips WHERE id = ?');
+
+const stmtGetTripFootprints = db.prepare(`
+  SELECT f.* FROM footprints f
+  INNER JOIN trip_footprints tf ON f.id = tf.footprint_id
+  WHERE tf.trip_id = ?
+  ORDER BY f.date ASC, f.created_at ASC
+`);
+
+const stmtAddFootprintToTrip = db.prepare(`
+  INSERT OR IGNORE INTO trip_footprints (trip_id, footprint_id, sort_order)
+  VALUES (?, ?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM trip_footprints WHERE trip_id = ?))
+`);
+
+const stmtRemoveFootprintFromTrip = db.prepare('DELETE FROM trip_footprints WHERE trip_id = ? AND footprint_id = ?');
+const stmtGetTripsByFootprintId = db.prepare(`
+  SELECT t.* FROM trips t
+  INNER JOIN trip_footprints tf ON t.id = tf.trip_id
+  WHERE tf.footprint_id = ?
+  ORDER BY t.start_date DESC
 `);
 
 const stmtGetImagesByFootprintId = db.prepare('SELECT * FROM footprint_images WHERE footprint_id = ? ORDER BY sort_order ASC, created_at ASC');
@@ -273,7 +324,168 @@ function removeImagesByFootprint(footprintId) {
   return stmtDeleteImagesByFootprintId.run(footprintId);
 }
 
+function getAllTrips() {
+  const trips = stmtGetAllTrips.all();
+  return trips.map(trip => {
+    const footprints = getTripFootprints(trip.id);
+    return { ...trip, footprintCount: footprints.length };
+  });
+}
+
+function getTripById(id) {
+  return stmtGetTripById.get(id);
+}
+
+function createTrip(data) {
+  const result = stmtInsertTrip.run({
+    name: data.name,
+    description: data.description || '',
+    start_date: data.start_date || null,
+    end_date: data.end_date || null,
+    cover_image: data.cover_image || null
+  });
+  return stmtGetTripById.get(result.lastInsertRowid);
+}
+
+function updateTrip(id, data) {
+  const existing = stmtGetTripById.get(id);
+  if (!existing) return null;
+  stmtUpdateTrip.run({
+    id,
+    name: data.name !== undefined ? data.name : existing.name,
+    description: data.description !== undefined ? data.description : existing.description,
+    start_date: data.start_date !== undefined ? data.start_date : existing.start_date,
+    end_date: data.end_date !== undefined ? data.end_date : existing.end_date,
+    cover_image: data.cover_image !== undefined ? data.cover_image : existing.cover_image
+  });
+  return stmtGetTripById.get(id);
+}
+
+function deleteTrip(id) {
+  return stmtDeleteTrip.run(id);
+}
+
+function getTripFootprints(tripId) {
+  const footprints = stmtGetTripFootprints.all(tripId);
+  return footprints.map(fp => {
+    const images = getImages(fp.id);
+    return { ...fp, images };
+  });
+}
+
+function addFootprintToTrip(tripId, footprintId) {
+  const result = stmtAddFootprintToTrip.run(tripId, footprintId, tripId);
+  return result.changes > 0;
+}
+
+function removeFootprintFromTrip(tripId, footprintId) {
+  const result = stmtRemoveFootprintFromTrip.run(tripId, footprintId);
+  return result.changes > 0;
+}
+
+function getTripsByFootprintId(footprintId) {
+  return stmtGetTripsByFootprintId.all(footprintId);
+}
+
+function getTripStats(tripId) {
+  const footprints = stmtGetTripFootprints.all(tripId);
+  const trip = stmtGetTripById.get(tripId);
+
+  if (footprints.length === 0) {
+    return {
+      totalDistance: 0,
+      footprintCount: 0,
+      days: 0,
+      cities: 0,
+      avgMood: 0
+    };
+  }
+
+  let totalDistance = 0;
+  for (let i = 0; i < footprints.length - 1; i++) {
+    totalDistance += haversineDistance(
+      footprints[i].lat, footprints[i].lng,
+      footprints[i + 1].lat, footprints[i + 1].lng
+    );
+  }
+
+  const dates = new Set(footprints.map(f => f.date));
+  const cities = new Set(footprints.map(f => f.name));
+  const avgMood = footprints.reduce((sum, f) => sum + f.mood, 0) / footprints.length;
+
+  let days = 0;
+  if (trip && trip.start_date && trip.end_date) {
+    const start = new Date(trip.start_date);
+    const end = new Date(trip.end_date);
+    days = Math.round((end - start) / (1000 * 60 * 60 * 24)) + 1;
+  } else {
+    days = dates.size;
+  }
+
+  return {
+    totalDistance: Math.round(totalDistance * 10) / 10,
+    footprintCount: footprints.length,
+    days,
+    cities: cities.size,
+    avgMood: Math.round(avgMood * 10) / 10
+  };
+}
+
+function generateGPX(tripId) {
+  const footprints = stmtGetTripFootprints.all(tripId);
+  const trip = stmtGetTripById.get(tripId);
+
+  let gpx = '<?xml version="1.0" encoding="UTF-8"?>\n';
+  gpx += '<gpx version="1.1" creator="Travel Footprint Map"\n';
+  gpx += '  xmlns="http://www.topografix.com/GPX/1/1"\n';
+  gpx += '  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"\n';
+  gpx += '  xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">\n';
+
+  if (trip) {
+    gpx += '  <metadata>\n';
+    gpx += '    <name>' + escapeXml(trip.name) + '</name>\n';
+    if (trip.description) {
+      gpx += '    <desc>' + escapeXml(trip.description) + '</desc>\n';
+    }
+    gpx += '  </metadata>\n';
+  }
+
+  gpx += '  <trk>\n';
+  gpx += '    <name>' + escapeXml(trip ? trip.name : 'Trip') + '</name>\n';
+  gpx += '    <trkseg>\n';
+
+  footprints.forEach(fp => {
+    gpx += '      <trkpt lat="' + fp.lat + '" lon="' + fp.lng + '">\n';
+    gpx += '        <name>' + escapeXml(fp.name) + '</name>\n';
+    if (fp.feeling) {
+      gpx += '        <desc>' + escapeXml(fp.feeling) + '</desc>\n';
+    }
+    if (fp.date) {
+      gpx += '        <time>' + fp.date + 'T00:00:00Z</time>\n';
+    }
+    gpx += '      </trkpt>\n';
+  });
+
+  gpx += '    </trkseg>\n';
+  gpx += '  </trk>\n';
+  gpx += '</gpx>\n';
+
+  return gpx;
+}
+
+function escapeXml(str) {
+  if (!str) return '';
+  return str.replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
 module.exports = {
   getAll, getById, create, remove, getStats,
-  getImages, getImage, addImage, removeImage, removeImagesByFootprint
+  getImages, getImage, addImage, removeImage, removeImagesByFootprint,
+  getAllTrips, getTripById, createTrip, updateTrip, deleteTrip,
+  getTripFootprints, addFootprintToTrip, removeFootprintFromTrip,
+  getTripsByFootprintId, getTripStats, generateGPX
 };

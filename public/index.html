@@ -75,6 +75,13 @@
     </div>
   </div>
 
+  <button id="trips-toggle" title="我的旅行">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M2 12h2l2-5 3 10 3-7 2 4h8"/>
+      <circle cx="12" cy="12" r="0" fill="currentColor"/>
+    </svg>
+  </button>
+
   <button id="timeline-toggle" title="足迹时间线">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
       <line x1="3" y1="4" x2="21" y2="4"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="20" x2="21" y2="20"/>
@@ -82,12 +89,89 @@
     </svg>
   </button>
 
+  <div id="trips-drawer" class="closed">
+    <div class="drawer-header">
+      <h2>我的旅行</h2>
+      <div class="drawer-actions">
+        <button id="trip-create-btn" class="btn-small">+ 新建旅行</button>
+        <button id="trips-close">&times;</button>
+      </div>
+    </div>
+    <div id="trips-list"></div>
+  </div>
+
   <div id="timeline-drawer" class="closed">
     <div class="drawer-header">
       <h2>足迹时间线</h2>
-      <button id="timeline-close">&times;</button>
+      <div class="drawer-actions">
+        <button id="timeline-toggle-mode" class="btn-small">按旅行</button>
+        <button id="timeline-close">&times;</button>
+      </div>
     </div>
     <div id="timeline-list"></div>
+  </div>
+
+  <div id="trip-modal" class="hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content">
+      <h3 id="trip-modal-title">创建旅行</h3>
+      <form id="trip-form">
+        <div class="form-group">
+          <label for="trip-name">旅行名称</label>
+          <input type="text" id="trip-name" required placeholder="例如：2024 日本关西之旅">
+        </div>
+        <div class="form-group">
+          <label for="trip-start-date">开始日期</label>
+          <input type="date" id="trip-start-date">
+        </div>
+        <div class="form-group">
+          <label for="trip-end-date">结束日期</label>
+          <input type="date" id="trip-end-date">
+        </div>
+        <div class="form-group">
+          <label for="trip-description">旅行描述</label>
+          <textarea id="trip-description" rows="3" placeholder="记录这次旅行的故事..."></textarea>
+        </div>
+        <div class="form-actions">
+          <button type="button" id="trip-cancel" class="btn-cancel">取消</button>
+          <button type="submit" class="btn-submit">保存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="trip-detail-drawer" class="closed">
+    <div class="drawer-header trip-detail-header">
+      <button id="trip-detail-back" class="btn-back">← 返回</button>
+      <h2 id="trip-detail-title">旅行详情</h2>
+      <button id="trip-detail-close">&times;</button>
+    </div>
+    <div id="trip-detail-content"></div>
+  </div>
+
+  <div id="route-animation-controls" class="hidden">
+    <div class="animation-controls">
+      <button id="animation-play" title="播放/暂停">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <polygon points="5 3 19 12 5 21 5 3"></polygon>
+        </svg>
+      </button>
+      <button id="animation-reset" title="重置">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="1 4 1 10 7 10"></polyline>
+          <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+        </svg>
+      </button>
+      <div class="speed-control">
+        <label>速度</label>
+        <select id="animation-speed">
+          <option value="0.5">0.5x</option>
+          <option value="1" selected>1x</option>
+          <option value="2">2x</option>
+          <option value="5">5x</option>
+        </select>
+      </div>
+    </div>
   </div>
 
   <div id="add-modal" class="hidden">

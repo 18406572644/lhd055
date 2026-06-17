@@ -25,10 +25,19 @@
   let lightboxImages = [];
   let lightboxIndex = 0;
 
+  let tripsCache = [];
+  let currentTripId = null;
+  let editingTripId = null;
+  let routePolyline = null;
+  let routeAnimationMarker = null;
+  let animationState = { playing: false, progress: 0, speed: 1, tripFootprints: [], rafId: null };
+  let timelineMode = 'all';
+
   function init() {
     initMap();
     bindEvents();
     loadFootprints();
+    loadTrips();
   }
 
   function initMap() {
@@ -107,21 +116,67 @@
       });
     }
 
-    document.getElementById('add-cancel').addEventListener('click', closeAddModal);
+    document.getElementById('trips-toggle').addEventListener('click', function () {
+      document.getElementById('trips-drawer').classList.remove('closed');
+      loadTrips();
+    });
 
-    document.querySelector('.modal-backdrop').addEventListener('click', closeAddModal);
+    document.getElementById('trips-close').addEventListener('click', function () {
+      document.getElementById('trips-drawer').classList.add('closed');
+    });
 
-    document.getElementById('add-form').addEventListener('submit', function (e) {
+    document.getElementById('trip-create-btn').addEventListener('click', function () {
+      editingTripId = null;
+      openTripModal();
+    });
+
+    document.getElementById('trip-cancel').addEventListener('click', closeTripModal);
+
+    document.querySelectorAll('#trip-modal .modal-backdrop').forEach(function (el) {
+      el.addEventListener('click', closeTripModal);
+    });
+
+    document.getElementById('trip-form').addEventListener('submit', function (e) {
       e.preventDefault();
-      submitFootprint();
+      submitTrip();
+    });
+
+    document.getElementById('trip-detail-back').addEventListener('click', function () {
+      document.getElementById('trip-detail-drawer').classList.add('closed');
+      clearRoute();
+      stopAnimation();
+      document.getElementById('route-animation-controls').classList.add('hidden');
+      currentTripId = null;
+    });
+
+    document.getElementById('trip-detail-close').addEventListener('click', function () {
+      document.getElementById('trip-detail-drawer').classList.add('closed');
+      document.getElementById('trips-drawer').classList.add('closed');
+      clearRoute();
+      stopAnimation();
+      document.getElementById('route-animation-controls').classList.add('hidden');
+      currentTripId = null;
+    });
+
+    document.getElementById('animation-play').addEventListener('click', toggleAnimation);
+    document.getElementById('animation-reset').addEventListener('click', resetAnimation);
+    document.getElementById('animation-speed').addEventListener('change', function (e) {
+      animationState.speed = parseFloat(e.target.value);
     });
 
     document.getElementById('timeline-toggle').addEventListener('click', function () {
       document.getElementById('timeline-drawer').classList.remove('closed');
+      loadTimeline();
     });
 
     document.getElementById('timeline-close').addEventListener('click', function () {
       document.getElementById('timeline-drawer').classList.add('closed');
+    });
+
+    document.getElementById('timeline-toggle-mode').addEventListener('click', function () {
+      timelineMode = timelineMode === 'all' ? 'byTrip' : 'all';
+      this.textContent = timelineMode === 'all' ? '按旅行' : '全部';
+      loadTimeline();
     });
 
     document.getElementById('detail-close').addEventListener('click', closeDetailPopup);
@@ -135,6 +190,7 @@
     document.addEventListener('keydown', function (e) {
       if (e.key === 'Escape') {
         closeAddModal();
+        closeTripModal();
         closeDetailPopup();
         closeLightbox();
       } else if (e.key === 'ArrowLeft') {
@@ -616,15 +672,27 @@
   }
 
   function loadTimeline() {
-    fetch('/api/footprints')
-      .then(function (res) { return res.json(); })
-      .then(function (footprints) {
-        footprintsCache = footprints;
-        renderTimeline(footprints);
-      })
-      .catch(function (err) {
-        console.error('Failed to load timeline:', err);
-      });
+    if (timelineMode === 'byTrip') {
+      fetch('/api/trips')
+        .then(function (res) { return res.json(); })
+        .then(function (trips) {
+          tripsCache = trips;
+          renderTimelineByTrip(trips);
+        })
+        .catch(function (err) {
+          console.error('Failed to load timeline trips:', err);
+        });
+    } else {
+      fetch('/api/footprints')
+        .then(function (res) { return res.json(); })
+        .then(function (footprints) {
+          footprintsCache = footprints;
+          renderTimeline(footprints);
+        })
+        .catch(function (err) {
+          console.error('Failed to load timeline:', err);
+        });
+    }
   }
 
   function renderTimeline(footprints) {
@@ -680,6 +748,149 @@
 
     list.querySelectorAll('.timeline-item').forEach(function (item) {
       item.addEventListener('click', function () {
+        var id = parseInt(item.getAttribute('data-id'), 10);
+        if (markers[id]) {
+          var latlng = markers[id].getLatLng();
+          map.setView(latlng, 12, { animate: true });
+          setTimeout(function () {
+            showDetailPopup(id);
+          }, 400);
+        }
+      });
+    });
+
+    lazyLoadImages();
+  }
+
+  function renderTimelineByTrip(trips) {
+    var list = document.getElementById('timeline-list');
+
+    if (!trips || trips.length === 0) {
+      list.innerHTML = '<div class="empty-timeline">' +
+        '<div class="empty-icon">✈️</div>' +
+        '<p>还没有旅行<br>点击「我的旅行」创建吧</p>' +
+        '</div>';
+      return;
+    }
+
+    var html = '';
+
+    trips.forEach(function (trip) {
+      var dates = '';
+      if (trip.start_date && trip.end_date) {
+        dates = trip.start_date + ' ~ ' + trip.end_date;
+      } else if (trip.start_date) {
+        dates = trip.start_date;
+      } else {
+        dates = '日期待定';
+      }
+
+      html += '<div class="timeline-trip-group" data-trip-id="' + trip.id + '">';
+      html += '<div class="timeline-trip-header">';
+      html += '<div class="trip-header-icon">✈️</div>';
+      html += '<div class="trip-header-info">';
+      html += '<h3>' + escapeHtml(trip.name) + '</h3>';
+      html += '<span class="trip-header-dates">' + dates + ' · ' + (trip.footprintCount || 0) + ' 足迹</span>';
+      html += '</div>';
+      html += '<div class="trip-header-toggle">▼</div>';
+      html += '</div>';
+      html += '<div class="timeline-trip-footprints" data-trip-id="' + trip.id + '" style="display:none;"></div>';
+      html += '</div>';
+    });
+
+    list.innerHTML = html;
+
+    list.querySelectorAll('.timeline-trip-header').forEach(function (header) {
+      header.addEventListener('click', function () {
+        var group = header.parentElement;
+        var tripId = parseInt(group.getAttribute('data-trip-id'), 10);
+        var footprintsContainer = group.querySelector('.timeline-trip-footprints');
+        var toggleIcon = header.querySelector('.trip-header-toggle');
+
+        if (footprintsContainer.style.display === 'none') {
+          footprintsContainer.style.display = 'block';
+          toggleIcon.textContent = '▲';
+          if (!footprintsContainer.dataset.loaded) {
+            loadTripFootprintsForTimeline(tripId, footprintsContainer);
+          }
+        } else {
+          footprintsContainer.style.display = 'none';
+          toggleIcon.textContent = '▼';
+        }
+      });
+    });
+
+    list.querySelectorAll('.timeline-trip-group h3').forEach(function (title) {
+      title.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var group = title.closest('.timeline-trip-group');
+        var tripId = parseInt(group.getAttribute('data-trip-id'), 10);
+        showTripDetail(tripId);
+      });
+    });
+  }
+
+  function loadTripFootprintsForTimeline(tripId, container) {
+    fetch('/api/trips/' + tripId + '/footprints')
+      .then(function (res) { return res.json(); })
+      .then(function (footprints) {
+        container.dataset.loaded = 'true';
+        renderTripFootprintsInTimeline(footprints, container);
+      })
+      .catch(function (err) {
+        console.error('Failed to load trip footprints:', err);
+      });
+  }
+
+  function renderTripFootprintsInTimeline(footprints, container) {
+    if (!footprints || footprints.length === 0) {
+      container.innerHTML = '<p style="color: var(--text-secondary); font-size: 0.8rem; padding: 10px 20px;">暂无足迹</p>';
+      return;
+    }
+
+    var monthNames = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+
+    var html = '';
+    footprints.forEach(function (fp) {
+      var dateParts = fp.date.split('-');
+      var month = monthNames[parseInt(dateParts[1], 10) - 1] || '';
+      var day = parseInt(dateParts[2], 10);
+      var color = MOOD_COLORS[fp.mood] || MOOD_COLORS[3];
+      var stars = '';
+      for (var i = 1; i <= 5; i++) {
+        stars += i <= fp.mood ? '★' : '☆';
+      }
+
+      var thumbHtml = '';
+      if (fp.images && fp.images.length > 0) {
+        var first = fp.images[0];
+        var thumb = imageUrl(first, 'thumb');
+        thumbHtml = '<div class="timeline-thumb">' +
+          '<img data-src="' + thumb + '" alt="" loading="lazy" class="lazy-img">' +
+          (fp.images.length > 1 ? '<span class="timeline-thumb-count">+' + (fp.images.length - 1) + '</span>' : '') +
+          '</div>';
+      }
+
+      html += '<div class="timeline-item" data-id="' + fp.id + '">' +
+        '<div class="timeline-date">' +
+        '<div class="month">' + month + '</div>' +
+        '<div class="day">' + day + '</div>' +
+        '</div>' +
+        '<div class="timeline-dot" style="background:' + color + ';color:' + color + ';"></div>' +
+        '<div class="timeline-content">' +
+        thumbHtml +
+        '<h4>' + escapeHtml(fp.name) + '</h4>' +
+        '<p>' + escapeHtml(fp.feeling || '未记录感受') + '</p>' +
+        '<div class="mood-stars" style="color:' + color + ';">' + stars + '</div>' +
+        '</div>' +
+        '</div>';
+    });
+
+    container.innerHTML = html;
+
+    container.querySelectorAll('.timeline-item').forEach(function (item) {
+      item.addEventListener('click', function (e) {
+        e.stopPropagation();
         var id = parseInt(item.getAttribute('data-id'), 10);
         if (markers[id]) {
           var latlng = markers[id].getLatLng();
@@ -933,6 +1144,522 @@
     div.appendChild(document.createTextNode(str));
     return div.innerHTML;
   }
+
+  function loadTrips() {
+    fetch('/api/trips')
+      .then(function (res) { return res.json(); })
+      .then(function (trips) {
+        tripsCache = trips;
+        renderTripsList(trips);
+      })
+      .catch(function (err) {
+        console.error('Failed to load trips:', err);
+      });
+  }
+
+  function renderTripsList(trips) {
+    var list = document.getElementById('trips-list');
+    if (!trips || trips.length === 0) {
+      list.innerHTML = '<div class="empty-trips">' +
+        '<div class="empty-icon">✈️</div>' +
+        '<p>还没有旅行<br>点击「新建旅行」开始记录吧</p>' +
+        '</div>';
+      return;
+    }
+
+    var html = '';
+    trips.forEach(function (trip) {
+      var dates = '';
+      if (trip.start_date && trip.end_date) {
+        dates = trip.start_date + ' ~ ' + trip.end_date;
+      } else if (trip.start_date) {
+        dates = trip.start_date;
+      } else {
+        dates = '日期待定';
+      }
+
+      html += '<div class="trip-card" data-id="' + trip.id + '">' +
+        '<h3>' + escapeHtml(trip.name) + '</h3>' +
+        '<div class="trip-dates">📅 ' + dates + '</div>' +
+        '<div class="trip-stats">' +
+        '<span>📍 ' + (trip.footprintCount || 0) + ' 足迹</span>' +
+        '</div>';
+      if (trip.description) {
+        html += '<div class="trip-desc">' + escapeHtml(trip.description) + '</div>';
+      }
+      html += '</div>';
+    });
+
+    list.innerHTML = html;
+
+    list.querySelectorAll('.trip-card').forEach(function (card) {
+      card.addEventListener('click', function () {
+        var id = parseInt(card.getAttribute('data-id'), 10);
+        showTripDetail(id);
+      });
+    });
+  }
+
+  function openTripModal(trip) {
+    var modal = document.getElementById('trip-modal');
+    modal.classList.remove('hidden');
+
+    var title = document.getElementById('trip-modal-title');
+    title.textContent = trip ? '编辑旅行' : '创建旅行';
+
+    document.getElementById('trip-name').value = trip ? trip.name : '';
+    document.getElementById('trip-start-date').value = trip ? (trip.start_date || '') : '';
+    document.getElementById('trip-end-date').value = trip ? (trip.end_date || '') : '';
+    document.getElementById('trip-description').value = trip ? (trip.description || '') : '';
+
+    document.getElementById('trip-name').focus();
+  }
+
+  function closeTripModal() {
+    document.getElementById('trip-modal').classList.add('hidden');
+    editingTripId = null;
+  }
+
+  function submitTrip() {
+    var name = document.getElementById('trip-name').value.trim();
+    var startDate = document.getElementById('trip-start-date').value;
+    var endDate = document.getElementById('trip-end-date').value;
+    var description = document.getElementById('trip-description').value.trim();
+
+    if (!name) return;
+
+    var data = {
+      name: name,
+      start_date: startDate || null,
+      end_date: endDate || null,
+      description: description
+    };
+
+    var url = '/api/trips';
+    var method = 'POST';
+
+    if (editingTripId) {
+      url = '/api/trips/' + editingTripId;
+      method = 'PUT';
+    }
+
+    fetch(url, {
+      method: method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    })
+      .then(function (res) { return res.json(); })
+      .then(function (trip) {
+        closeTripModal();
+        loadTrips();
+        if (currentTripId && currentTripId === trip.id) {
+          showTripDetail(trip.id);
+        }
+      })
+      .catch(function (err) {
+        console.error('Failed to save trip:', err);
+      });
+  }
+
+  function showTripDetail(tripId) {
+    currentTripId = tripId;
+    document.getElementById('trip-detail-drawer').classList.remove('closed');
+
+    fetch('/api/trips/' + tripId)
+      .then(function (res) { return res.json(); })
+      .then(function (trip) {
+        if (currentTripId !== tripId) return;
+        renderTripDetail(trip);
+        drawRoute(trip.footprints || []);
+        if ((trip.footprints || []).length >= 2) {
+          document.getElementById('route-animation-controls').classList.remove('hidden');
+        } else {
+          document.getElementById('route-animation-controls').classList.add('hidden');
+        }
+      })
+      .catch(function (err) {
+        console.error('Failed to load trip detail:', err);
+      });
+  }
+
+  function renderTripDetail(trip) {
+    var content = document.getElementById('trip-detail-content');
+    var titleEl = document.getElementById('trip-detail-title');
+
+    titleEl.textContent = trip.name;
+
+    var dates = '';
+    if (trip.start_date && trip.end_date) {
+      dates = trip.start_date + ' ~ ' + trip.end_date;
+    } else if (trip.start_date) {
+      dates = trip.start_date;
+    } else {
+      dates = '日期待定';
+    }
+
+    var stats = trip.stats || {};
+
+    var html = '';
+
+    html += '<div class="trip-info-section">';
+    html += '<h3>📊 旅行统计</h3>';
+    html += '<div class="trip-stat-grid">';
+    html += '<div class="trip-stat-item"><div class="stat-num">' + (stats.footprintCount || 0) + '</div><div class="stat-label">足迹数</div></div>';
+    html += '<div class="trip-stat-item"><div class="stat-num">' + (stats.days || 0) + '</div><div class="stat-label">天数</div></div>';
+    html += '<div class="trip-stat-item"><div class="stat-num">' + (stats.cities || 0) + '</div><div class="stat-label">城市</div></div>';
+    html += '<div class="trip-stat-item"><div class="stat-num">' + (stats.totalDistance || 0) + '</div><div class="stat-label">总距离(km)</div></div>';
+    html += '</div>';
+    html += '</div>';
+
+    if (trip.description) {
+      html += '<div class="trip-info-section">';
+      html += '<h3>📝 旅行描述</h3>';
+      html += '<div class="trip-description">' + escapeHtml(trip.description) + '</div>';
+      html += '</div>';
+    }
+
+    html += '<div class="trip-info-section">';
+    html += '<h3>📍 足迹路线</h3>';
+    html += '<div class="trip-footprints-list">';
+
+    var footprints = trip.footprints || [];
+    if (footprints.length === 0) {
+      html += '<p style="color: var(--text-secondary); font-size: 0.85rem; text-align: center; padding: 20px;">暂无足迹，点击地图添加足迹后，可在足迹详情中添加到本次旅行</p>';
+    } else {
+      footprints.forEach(function (fp, idx) {
+        html += '<div class="trip-footprint-item" data-id="' + fp.id + '">' +
+          '<div class="fp-index">' + (idx + 1) + '</div>' +
+          '<div class="fp-info">' +
+          '<div class="fp-name">' + escapeHtml(fp.name) + '</div>' +
+          '<div class="fp-date">' + fp.date + '</div>' +
+          '</div>' +
+          '</div>';
+      });
+    }
+
+    html += '</div>';
+    html += '</div>';
+
+    html += '<div class="trip-actions">';
+    html += '<button id="btn-edit-trip">✏️ 编辑</button>';
+    html += '<button id="btn-export-gpx">📥 导出GPX</button>';
+    html += '<button id="btn-delete-trip" class="danger">🗑️ 删除</button>';
+    html += '</div>';
+
+    content.innerHTML = html;
+
+    content.querySelectorAll('.trip-footprint-item').forEach(function (item) {
+      item.addEventListener('click', function () {
+        var id = parseInt(item.getAttribute('data-id'), 10);
+        if (markers[id]) {
+          var latlng = markers[id].getLatLng();
+          map.setView(latlng, 13, { animate: true });
+          setTimeout(function () {
+            showDetailPopup(id);
+          }, 400);
+        }
+      });
+    });
+
+    document.getElementById('btn-edit-trip').addEventListener('click', function () {
+      editingTripId = trip.id;
+      openTripModal(trip);
+    });
+
+    document.getElementById('btn-export-gpx').addEventListener('click', function () {
+      window.location.href = '/api/trips/' + trip.id + '/gpx';
+    });
+
+    document.getElementById('btn-delete-trip').addEventListener('click', function () {
+      if (confirm('确定要删除这次旅行吗？（不会删除足迹）')) {
+        deleteTrip(trip.id);
+      }
+    });
+
+    var footprints2 = trip.footprints || [];
+    if (footprints2.length > 0) {
+      var bounds = L.latLngBounds(footprints2.map(function (fp) {
+        return [fp.lat, fp.lng];
+      }));
+      map.fitBounds(bounds, { padding: [80, 80], animate: true });
+    }
+  }
+
+  function deleteTrip(tripId) {
+    fetch('/api/trips/' + tripId, { method: 'DELETE' })
+      .then(function (res) {
+        if (!res.ok) throw new Error('Delete failed');
+        return res.json();
+      })
+      .then(function () {
+        document.getElementById('trip-detail-drawer').classList.add('closed');
+        clearRoute();
+        stopAnimation();
+        document.getElementById('route-animation-controls').classList.add('hidden');
+        currentTripId = null;
+        loadTrips();
+      })
+      .catch(function (err) {
+        console.error('Failed to delete trip:', err);
+      });
+  }
+
+  function drawRoute(footprints) {
+    clearRoute();
+
+    if (!footprints || footprints.length < 2) return;
+
+    var latlngs = footprints.map(function (fp) {
+      return [fp.lat, fp.lng];
+    });
+
+    routePolyline = L.polyline(latlngs, {
+      color: '#00ffc8',
+      weight: 3,
+      opacity: 0.8,
+      lineJoin: 'round',
+      lineCap: 'round',
+      dashArray: '10, 6',
+      className: 'route-dashed'
+    }).addTo(map);
+
+    var gradientPolyline = L.polyline(latlngs, {
+      color: '#00ffc8',
+      weight: 2,
+      opacity: 1,
+      lineJoin: 'round',
+      lineCap: 'round'
+    }).addTo(map);
+
+    routePolyline._gradientLine = gradientPolyline;
+
+    animationState.tripFootprints = footprints;
+    animationState.progress = 0;
+  }
+
+  function clearRoute() {
+    if (routePolyline) {
+      if (routePolyline._gradientLine) {
+        map.removeLayer(routePolyline._gradientLine);
+      }
+      map.removeLayer(routePolyline);
+      routePolyline = null;
+    }
+    if (routeAnimationMarker) {
+      map.removeLayer(routeAnimationMarker);
+      routeAnimationMarker = null;
+    }
+    stopAnimation();
+    animationState.progress = 0;
+    animationState.tripFootprints = [];
+  }
+
+  function toggleAnimation() {
+    if (animationState.playing) {
+      pauseAnimation();
+    } else {
+      startAnimation();
+    }
+  }
+
+  function startAnimation() {
+    if (!animationState.tripFootprints || animationState.tripFootprints.length < 2) return;
+
+    animationState.playing = true;
+    updatePlayButton();
+
+    if (!routeAnimationMarker) {
+      var icon = L.divIcon({
+        className: '',
+        html: '<div class="route-animation-marker"></div>',
+        iconSize: [14, 14],
+        iconAnchor: [7, 7]
+      });
+      var start = animationState.tripFootprints[0];
+      routeAnimationMarker = L.marker([start.lat, start.lng], { icon: icon }).addTo(map);
+    }
+
+    animateRoute();
+  }
+
+  function pauseAnimation() {
+    animationState.playing = false;
+    updatePlayButton();
+    if (animationState.rafId) {
+      cancelAnimationFrame(animationState.rafId);
+      animationState.rafId = null;
+    }
+  }
+
+  function stopAnimation() {
+    animationState.playing = false;
+    if (animationState.rafId) {
+      cancelAnimationFrame(animationState.rafId);
+      animationState.rafId = null;
+    }
+  }
+
+  function resetAnimation() {
+    stopAnimation();
+    animationState.progress = 0;
+    if (routeAnimationMarker && animationState.tripFootprints.length > 0) {
+      var start = animationState.tripFootprints[0];
+      routeAnimationMarker.setLatLng([start.lat, start.lng]);
+    }
+    updatePlayButton();
+  }
+
+  function updatePlayButton() {
+    var btn = document.getElementById('animation-play');
+    if (animationState.playing) {
+      btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>';
+    } else {
+      btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>';
+    }
+  }
+
+  function animateRoute() {
+    if (!animationState.playing) return;
+
+    var footprints = animationState.tripFootprints;
+    if (footprints.length < 2) return;
+
+    var totalSegments = footprints.length - 1;
+    var currentSegment = Math.floor(animationState.progress * totalSegments);
+    var segmentProgress = (animationState.progress * totalSegments) - currentSegment;
+
+    if (currentSegment >= totalSegments) {
+      animationState.playing = false;
+      updatePlayButton();
+      return;
+    }
+
+    var start = footprints[currentSegment];
+    var end = footprints[currentSegment + 1];
+
+    var lat = start.lat + (end.lat - start.lat) * segmentProgress;
+    var lng = start.lng + (end.lng - start.lng) * segmentProgress;
+
+    if (routeAnimationMarker) {
+      routeAnimationMarker.setLatLng([lat, lng]);
+    }
+
+    var speed = animationState.speed || 1;
+    animationState.progress += 0.003 * speed;
+
+    if (animationState.progress >= 1) {
+      animationState.progress = 1;
+      animationState.playing = false;
+      updatePlayButton();
+    } else {
+      animationState.rafId = requestAnimationFrame(animateRoute);
+    }
+  }
+
+  function loadFootprintTrips(footprintId) {
+    return fetch('/api/footprints/' + footprintId + '/trips')
+      .then(function (res) { return res.json(); })
+      .catch(function (err) {
+        console.error('Failed to load footprint trips:', err);
+        return [];
+      });
+  }
+
+  function addFootprintToTrip(tripId, footprintId) {
+    return fetch('/api/trips/' + tripId + '/footprints/' + footprintId, { method: 'POST' })
+      .then(function (res) { return res.json(); })
+      .then(function (result) {
+        if (result.success) {
+          loadTrips();
+          if (currentTripId === tripId) {
+            showTripDetail(tripId);
+          }
+        }
+        return result;
+      })
+      .catch(function (err) {
+        console.error('Failed to add footprint to trip:', err);
+        return { success: false };
+      });
+  }
+
+  function renderDetailTrips(trips, footprintId) {
+    var tripsHtml = '';
+    if (trips.length > 0) {
+      tripsHtml += '<div class="detail-trips">';
+      tripsHtml += '<div class="detail-trips-label">所属旅行：</div>';
+      trips.forEach(function (trip) {
+        tripsHtml += '<span class="detail-trip-tag" data-trip-id="' + trip.id + '">' + escapeHtml(trip.name) + '</span>';
+      });
+      tripsHtml += '</div>';
+    }
+
+    var selectHtml = '<div class="add-to-trip-select">';
+    selectHtml += '<select id="add-to-trip-select">';
+    selectHtml += '<option value="">+ 添加到旅行...</option>';
+    tripsCache.forEach(function (trip) {
+      var isInTrip = trips.some(function (t) { return t.id === trip.id; });
+      if (!isInTrip) {
+        selectHtml += '<option value="' + trip.id + '">' + escapeHtml(trip.name) + '</option>';
+      }
+    });
+    selectHtml += '</select>';
+    selectHtml += '</div>';
+
+    return tripsHtml + selectHtml;
+  }
+
+  var originalShowDetailPopup = showDetailPopup;
+  showDetailPopup = function (id) {
+    originalShowDetailPopup(id);
+
+    setTimeout(function () {
+      loadFootprintTrips(id).then(function (trips) {
+        if (currentDetailId !== id) return;
+
+        var detailPopup = document.getElementById('detail-popup');
+        var existingTripsSection = detailPopup.querySelector('.detail-trips-section');
+        if (existingTripsSection) existingTripsSection.remove();
+
+        var tripsSection = document.createElement('div');
+        tripsSection.className = 'detail-trips-section';
+        tripsSection.innerHTML = renderDetailTrips(trips, id);
+        detailPopup.insertBefore(tripsSection, detailPopup.querySelector('.btn-delete'));
+
+        tripsSection.querySelectorAll('.detail-trip-tag').forEach(function (tag) {
+          tag.addEventListener('click', function (e) {
+            e.stopPropagation();
+            var tripId = parseInt(tag.getAttribute('data-trip-id'), 10);
+            closeDetailPopup();
+            showTripDetail(tripId);
+          });
+        });
+
+        var select = tripsSection.querySelector('#add-to-trip-select');
+        if (select) {
+          select.addEventListener('change', function (e) {
+            var tripId = parseInt(e.target.value, 10);
+            if (tripId) {
+              addFootprintToTrip(tripId, id).then(function () {
+                loadFootprintTrips(id).then(function (updatedTrips) {
+                  if (currentDetailId === id) {
+                    tripsSection.innerHTML = renderDetailTrips(updatedTrips, id);
+                    var newSelect = tripsSection.querySelector('#add-to-trip-select');
+                    if (newSelect) {
+                      newSelect.addEventListener('change', function (e2) {
+                        var tid = parseInt(e2.target.value, 10);
+                        if (tid) addFootprintToTrip(tid, id);
+                      });
+                    }
+                  }
+                });
+              });
+            }
+          });
+        }
+      });
+    }, 50);
+  };
 
   document.addEventListener('DOMContentLoaded', init);
 })();
