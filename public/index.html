@@ -13,19 +13,65 @@
 <body>
   <div id="map"></div>
 
-  <div id="stats-panel">
-    <h2>旅行统计</h2>
-    <div class="stat-item">
-      <span class="stat-value" id="stat-total">0</span>
-      <span class="stat-label">足迹总数</span>
+  <div id="stats-panel" class="collapsed">
+    <div class="stats-header">
+      <h2>旅行统计</h2>
+      <button id="stats-toggle" title="展开/收起详细统计">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="6 9 12 15 18 9"></polyline>
+        </svg>
+      </button>
     </div>
-    <div class="stat-item">
-      <span class="stat-value" id="stat-cities">0</span>
-      <span class="stat-label">到访城市</span>
+    <div class="stats-basic">
+      <div class="stat-item">
+        <span class="stat-value" id="stat-total">0</span>
+        <span class="stat-label">足迹总数</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-value" id="stat-days">0</span>
+        <span class="stat-label">旅行天数</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-value" id="stat-cities">0</span>
+        <span class="stat-label">到访城市</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-value" id="stat-countries">0</span>
+        <span class="stat-label">国家/地区</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-value" id="stat-provinces">0</span>
+        <span class="stat-label">省份/州</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-value" id="stat-month">暂无</span>
+        <span class="stat-label">最爱月份</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-value" id="stat-distance">0</span>
+        <span class="stat-label">最远距离(km)</span>
+      </div>
     </div>
-    <div class="stat-item">
-      <span class="stat-value" id="stat-month">暂无</span>
-      <span class="stat-label">最爱的月份</span>
+    <div class="stats-expanded">
+      <div class="stats-section">
+        <h3>心情分布</h3>
+        <div class="chart-row">
+          <div class="chart-container">
+            <canvas id="mood-pie-chart" width="200" height="200"></canvas>
+          </div>
+          <div class="mood-legend" id="mood-legend"></div>
+        </div>
+      </div>
+      <div class="stats-section">
+        <h3>全年旅行趋势</h3>
+        <div class="chart-container bar-chart-container">
+          <canvas id="monthly-bar-chart" width="360" height="160"></canvas>
+        </div>
+      </div>
+      <div class="stats-section">
+        <h3>年度对比</h3>
+        <div class="yearly-card" id="yearly-card"></div>
+      </div>
     </div>
   </div>
 

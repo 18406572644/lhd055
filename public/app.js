@@ -92,6 +92,21 @@
       });
     });
 
+    var statsToggle = document.getElementById('stats-toggle');
+    if (statsToggle) {
+      statsToggle.addEventListener('click', function () {
+        var panel = document.getElementById('stats-panel');
+        panel.classList.toggle('collapsed');
+        if (!panel.classList.contains('collapsed')) {
+          setTimeout(function () {
+            if (window._lastStats) {
+              renderCharts(window._lastStats);
+            }
+          }, 50);
+        }
+      });
+    }
+
     document.getElementById('add-cancel').addEventListener('click', closeAddModal);
 
     document.querySelector('.modal-backdrop').addEventListener('click', closeAddModal);
@@ -683,13 +698,230 @@
     return footprintsCache.find(function (fp) { return fp.id === id; }) || null;
   }
 
+  function renderMoodPieChart(moodDistribution) {
+    var canvas = document.getElementById('mood-pie-chart');
+    if (!canvas) return;
+    var ctx = canvas.getContext('2d');
+    var dpr = window.devicePixelRatio || 1;
+    var w = canvas.width, h = canvas.height;
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, w, h);
+
+    var total = 0;
+    for (var k in moodDistribution) total += moodDistribution[k];
+    if (total === 0) {
+      ctx.fillStyle = '#30363d';
+      ctx.beginPath();
+      ctx.arc(w / 2, h / 2, Math.min(w, h) / 2 - 10, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#8b949e';
+      ctx.font = '13px "Source Serif 4", serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('暂无数据', w / 2, h / 2 + 5);
+      return;
+    }
+
+    var cx = w / 2, cy = h / 2;
+    var radius = Math.min(w, h) / 2 - 8;
+    var innerRadius = radius * 0.55;
+    var startAngle = -Math.PI / 2;
+
+    var moods = [1, 2, 3, 4, 5];
+    moods.forEach(function (m) {
+      var cnt = moodDistribution[m] || 0;
+      if (cnt === 0) return;
+      var sliceAngle = (cnt / total) * Math.PI * 2;
+      var endAngle = startAngle + sliceAngle;
+
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, startAngle, endAngle);
+      ctx.arc(cx, cy, innerRadius, endAngle, startAngle, true);
+      ctx.closePath();
+      ctx.fillStyle = MOOD_COLORS[m];
+      ctx.fill();
+
+      startAngle = endAngle;
+    });
+
+    ctx.fillStyle = '#e6edf3';
+    ctx.font = 'bold 22px "Instrument Serif", serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(total, cx, cy - 6);
+    ctx.fillStyle = '#8b949e';
+    ctx.font = '11px "Source Serif 4", serif';
+    ctx.fillText('条足迹', cx, cy + 14);
+  }
+
+  function renderMoodLegend(moodDistribution) {
+    var legend = document.getElementById('mood-legend');
+    if (!legend) return;
+    var total = 0;
+    for (var k in moodDistribution) total += moodDistribution[k];
+    var html = '';
+    [1, 2, 3, 4, 5].forEach(function (m) {
+      var cnt = moodDistribution[m] || 0;
+      var pct = total > 0 ? Math.round((cnt / total) * 100) : 0;
+      html += '<div class="mood-legend-item">' +
+        '<span class="mood-dot" style="background:' + MOOD_COLORS[m] + '"></span>' +
+        '<span class="mood-label">' + MOOD_LABELS[m] + '</span>' +
+        '<span class="mood-count">' + cnt + ' (' + pct + '%)</span>' +
+        '</div>';
+    });
+    legend.innerHTML = html;
+  }
+
+  function renderMonthlyBarChart(monthlyTrend) {
+    var canvas = document.getElementById('monthly-bar-chart');
+    if (!canvas) return;
+    var ctx = canvas.getContext('2d');
+    var dpr = window.devicePixelRatio || 1;
+    var w = canvas.width, h = canvas.height;
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, w, h);
+
+    var currentYear = new Date().getFullYear();
+    var months = [];
+    for (var i = 0; i < 12; i++) {
+      var key = currentYear + '-' + (i < 9 ? '0' + (i + 1) : (i + 1));
+      months.push({ key: key, label: (i + 1) + '月', value: monthlyTrend[key] || 0 });
+    }
+
+    var maxVal = Math.max.apply(null, months.map(function (m) { return m.value; }), 1);
+    var paddingLeft = 28, paddingRight = 8, paddingTop = 16, paddingBottom = 24;
+    var chartW = w - paddingLeft - paddingRight;
+    var chartH = h - paddingTop - paddingBottom;
+    var barW = chartW / 12 * 0.6;
+    var gap = chartW / 12 * 0.4;
+
+    ctx.strokeStyle = 'rgba(139, 148, 158, 0.15)';
+    ctx.lineWidth = 1;
+    var gridLines = 4;
+    for (var g = 0; g <= gridLines; g++) {
+      var y = paddingTop + (chartH / gridLines) * g;
+      ctx.beginPath();
+      ctx.moveTo(paddingLeft, y);
+      ctx.lineTo(w - paddingRight, y);
+      ctx.stroke();
+      var val = Math.round(maxVal - (maxVal / gridLines) * g);
+      ctx.fillStyle = '#8b949e';
+      ctx.font = '10px "Source Serif 4", serif';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(val, paddingLeft - 4, y);
+    }
+
+    var gradient = ctx.createLinearGradient(0, paddingTop, 0, paddingTop + chartH);
+    gradient.addColorStop(0, '#00ffc8');
+    gradient.addColorStop(1, '#7c3aed');
+
+    months.forEach(function (m, idx) {
+      var barH = (m.value / maxVal) * chartH;
+      var x = paddingLeft + idx * (barW + gap) + gap / 2;
+      var y = paddingTop + chartH - barH;
+
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      var r = 3;
+      if (barH > r * 2) {
+        ctx.moveTo(x + r, y);
+        ctx.lineTo(x + barW - r, y);
+        ctx.quadraticCurveTo(x + barW, y, x + barW, y + r);
+        ctx.lineTo(x + barW, y + barH);
+        ctx.lineTo(x, y + barH);
+        ctx.lineTo(x, y + r);
+        ctx.quadraticCurveTo(x, y, x + r, y);
+      } else {
+        ctx.rect(x, y, barW, barH);
+      }
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = '#8b949e';
+      ctx.font = '10px "Source Serif 4", serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText(m.label, x + barW / 2, paddingTop + chartH + 6);
+
+      if (m.value > 0) {
+        ctx.fillStyle = '#e6edf3';
+        ctx.font = 'bold 10px "Source Serif 4", serif';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText(m.value, x + barW / 2, y - 3);
+      }
+    });
+  }
+
+  function renderYearlyCard(yearly) {
+    var card = document.getElementById('yearly-card');
+    if (!card) return;
+    var cur = yearly.current;
+    var last = yearly.last;
+
+    function diffStr(curVal, lastVal) {
+      var d = curVal - lastVal;
+      if (lastVal === 0 && curVal === 0) return '<span class="diff neutral">—</span>';
+      if (lastVal === 0) return '<span class="diff up">+新增</span>';
+      if (d > 0) return '<span class="diff up">+' + d + '</span>';
+      if (d < 0) return '<span class="diff down">' + d + '</span>';
+      return '<span class="diff neutral">持平</span>';
+    }
+
+    card.innerHTML =
+      '<div class="yearly-row">' +
+      '<div class="yearly-header"><span class="year-label">' + yearly.currentYear + '年</span><span class="year-sub">今年</span></div>' +
+      '<div class="yearly-header"><span class="year-label">' + yearly.lastYear + '年</span><span class="year-sub">去年</span></div>' +
+      '<div class="yearly-header diff-col">变化</div>' +
+      '</div>' +
+      '<div class="yearly-row">' +
+      '<div class="yearly-cell"><span class="cell-val">' + cur.total + '</span><span class="cell-lbl">足迹</span></div>' +
+      '<div class="yearly-cell"><span class="cell-val">' + last.total + '</span><span class="cell-lbl">足迹</span></div>' +
+      '<div class="yearly-cell diff-col">' + diffStr(cur.total, last.total) + '</div>' +
+      '</div>' +
+      '<div class="yearly-row">' +
+      '<div class="yearly-cell"><span class="cell-val">' + cur.days + '</span><span class="cell-lbl">天数</span></div>' +
+      '<div class="yearly-cell"><span class="cell-val">' + last.days + '</span><span class="cell-lbl">天数</span></div>' +
+      '<div class="yearly-cell diff-col">' + diffStr(cur.days, last.days) + '</div>' +
+      '</div>' +
+      '<div class="yearly-row">' +
+      '<div class="yearly-cell"><span class="cell-val">' + cur.cities + '</span><span class="cell-lbl">城市</span></div>' +
+      '<div class="yearly-cell"><span class="cell-val">' + last.cities + '</span><span class="cell-lbl">城市</span></div>' +
+      '<div class="yearly-cell diff-col">' + diffStr(cur.cities, last.cities) + '</div>' +
+      '</div>';
+  }
+
+  function renderCharts(stats) {
+    renderMoodPieChart(stats.moodDistribution || {});
+    renderMoodLegend(stats.moodDistribution || {});
+    renderMonthlyBarChart(stats.monthlyTrend || {});
+    renderYearlyCard(stats.yearlyComparison || { currentYear: '-', lastYear: '-', current: {}, last: {} });
+  }
+
   function loadStats() {
     fetch('/api/stats')
       .then(function (res) { return res.json(); })
       .then(function (stats) {
+        window._lastStats = stats;
         document.getElementById('stat-total').textContent = stats.total;
+        document.getElementById('stat-days').textContent = stats.travelDays || 0;
         document.getElementById('stat-cities').textContent = stats.cities;
+        document.getElementById('stat-countries').textContent = stats.countries || 0;
+        document.getElementById('stat-provinces').textContent = stats.provinces || 0;
         document.getElementById('stat-month').textContent = stats.favoriteMonth;
+        document.getElementById('stat-distance').textContent = stats.maxDistance || 0;
+
+        var panel = document.getElementById('stats-panel');
+        if (panel && !panel.classList.contains('collapsed')) {
+          renderCharts(stats);
+        }
       })
       .catch(function (err) {
         console.error('Failed to load stats:', err);
