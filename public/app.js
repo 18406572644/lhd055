@@ -1367,7 +1367,12 @@
     });
 
     document.getElementById('btn-export-gpx').addEventListener('click', function () {
-      window.location.href = '/api/trips/' + trip.id + '/gpx';
+      var a = document.createElement('a');
+      a.href = '/api/trips/' + trip.id + '/gpx';
+      a.download = trip.name + '.gpx';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
     });
 
     document.getElementById('btn-delete-trip').addEventListener('click', function () {
