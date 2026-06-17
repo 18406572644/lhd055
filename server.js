@@ -115,6 +115,20 @@ app.get('/api/stats', (req, res) => {
   }
 });
 
+app.get('/api/footprints/:id', (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const footprint = db.getById(id);
+    if (!footprint) {
+      return res.status(404).json({ error: 'Footprint not found' });
+    }
+    footprint.images = db.getImages(id);
+    res.json(footprint);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/footprints/:id/images', (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);

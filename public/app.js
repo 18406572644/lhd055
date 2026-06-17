@@ -261,12 +261,15 @@
         addMarkerToMap(fp);
         if (pendingFiles.length > 0) {
           var files = pendingFiles.slice();
+          var newFpId = fp.id;
           pendingFiles = [];
-          uploadImages(fp.id, files).then(function (savedImages) {
+          uploadImages(newFpId, files).then(function (savedImages) {
             fp.images = savedImages || [];
             updateFootprintCache(fp);
-            addMarkerToMap(fp);
             loadTimeline();
+            if (currentDetailId === newFpId) {
+              refreshDetailImages();
+            }
           });
         }
         loadTimeline();
@@ -329,36 +332,34 @@
 
     marker.on('click', function (e) {
       L.DomEvent.stopPropagation(e);
-      showDetailPopup(fp, marker);
+      showDetailPopup(fp.id);
     });
 
     markers[fp.id] = marker;
   }
 
-  function showDetailPopup(fp, marker) {
-    currentDetailId = fp.id;
+  function fetchFootprintById(id) {
+    return fetch('/api/footprints/' + id)
+      .then(function (res) {
+        if (!res.ok) throw new Error('Footprint not found');
+        return res.json();
+      })
+      .then(function (fp) {
+        updateFootprintCache(fp);
+        return fp;
+      });
+  }
 
-    document.getElementById('detail-name').textContent = fp.name;
-    document.getElementById('detail-date').textContent = fp.date;
-
-    var feelingEl = document.getElementById('detail-feeling');
-    feelingEl.textContent = fp.feeling || '未记录感受';
-
-    var moodEl = document.getElementById('detail-mood');
-    var stars = '';
-    for (var i = 1; i <= 5; i++) {
-      stars += i <= fp.mood ? '★' : '☆';
-    }
-    moodEl.textContent = stars + ' ' + (MOOD_LABELS[fp.mood] || '');
-
-    renderDetailGallery(fp.images || []);
-
-    document.querySelector('.detail-upload').classList.remove('hidden');
+  function showDetailPopup(id) {
+    var cached = getFootprintLocal(id);
+    currentDetailId = id;
 
     var popup = document.getElementById('detail-popup');
     popup.classList.remove('hidden');
+    document.querySelector('.detail-upload').classList.remove('hidden');
 
-    var point = map.latLngToContainerPoint([fp.lat, fp.lng]);
+    var targetFp = cached || { lat: 0, lng: 0 };
+    var point = map.latLngToContainerPoint([targetFp.lat, targetFp.lng]);
     var popupWidth = 320;
     var popupHeight = 420;
 
@@ -375,6 +376,36 @@
 
     popup.style.left = left + 'px';
     popup.style.top = top + 'px';
+
+    renderDetailGallery([]);
+    if (cached) {
+      applyDetailData(cached);
+    }
+
+    fetchFootprintById(id)
+      .then(function (fp) {
+        if (currentDetailId !== id) return;
+        applyDetailData(fp);
+        renderDetailGallery(fp.images || []);
+      })
+      .catch(function (err) {
+        console.error('Failed to load footprint detail:', err);
+      });
+  }
+
+  function applyDetailData(fp) {
+    document.getElementById('detail-name').textContent = fp.name;
+    document.getElementById('detail-date').textContent = fp.date;
+
+    var feelingEl = document.getElementById('detail-feeling');
+    feelingEl.textContent = fp.feeling || '未记录感受';
+
+    var moodEl = document.getElementById('detail-mood');
+    var stars = '';
+    for (var i = 1; i <= 5; i++) {
+      stars += i <= fp.mood ? '★' : '☆';
+    }
+    moodEl.textContent = stars + ' ' + (MOOD_LABELS[fp.mood] || '');
   }
 
   function renderDetailGallery(images) {
@@ -404,14 +435,10 @@
 
   function refreshDetailImages() {
     if (currentDetailId == null) return;
-    fetch('/api/footprints/' + currentDetailId + '/images')
-      .then(function (res) { return res.json(); })
-      .then(function (images) {
-        renderDetailGallery(images);
-        var fp = getFootprintLocal(currentDetailId);
-        if (fp) {
-          fp.images = images;
-        }
+    fetchFootprintById(currentDetailId)
+      .then(function (fp) {
+        if (currentDetailId !== fp.id) return;
+        renderDetailGallery(fp.images || []);
       })
       .catch(function (err) {
         console.error(err);
@@ -643,8 +670,7 @@
           var latlng = markers[id].getLatLng();
           map.setView(latlng, 12, { animate: true });
           setTimeout(function () {
-            var fp = getFootprintLocal(id);
-            if (fp) showDetailPopup(fp, markers[id]);
+            showDetailPopup(id);
           }, 400);
         }
       });
