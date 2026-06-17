@@ -71,7 +71,13 @@ const avatarUpload = multer({
 });
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(function (err, req, res, next) {
+  if (err.type === 'entity.parse.failed') {
+    return res.status(400).json({ error: '请求数据格式错误' });
+  }
+  next(err);
+});
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/uploads', express.static(UPLOAD_DIR));
 
@@ -233,11 +239,11 @@ app.put('/api/auth/password', authMiddleware, (req, res) => {
     }
     const fullUser = db.getUserByUsername(req.user.username);
     if (!fullUser) {
-      return res.status(401).json({ error: '用户不存在' });
+      return res.status(400).json({ error: '用户不存在' });
     }
     const valid = db.verifyPassword(oldPassword, fullUser.password);
     if (!valid) {
-      return res.status(401).json({ error: '旧密码错误' });
+      return res.status(400).json({ error: '旧密码错误' });
     }
     db.updateUserPassword(req.user.id, newPassword);
     res.json({ success: true });

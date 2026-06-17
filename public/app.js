@@ -90,17 +90,27 @@
     if (animationControls) animationControls.classList.add('hidden');
   }
 
-  function showAppPage() {
+  function showAppPage(isGuest) {
     document.getElementById('auth-page').style.display = 'none';
     document.getElementById('map').style.display = '';
     document.getElementById('stats-panel').style.display = '';
     var userBtn = document.getElementById('user-menu-btn');
-    if (userBtn) userBtn.style.display = '';
+    if (userBtn) {
+      if (isGuest) {
+        userBtn.style.display = 'none';
+      } else {
+        userBtn.style.display = '';
+      }
+    }
     var tripsToggle = document.getElementById('trips-toggle');
     if (tripsToggle) tripsToggle.style.display = '';
     var timelineToggle = document.getElementById('timeline-toggle');
     if (timelineToggle) timelineToggle.style.display = '';
-    updateUserUI();
+    if (!isGuest) {
+      updateUserUI();
+    } else {
+      showGuestLoginHint();
+    }
   }
 
   function updateUserUI() {
@@ -131,6 +141,28 @@
 
     var dropdownUsername = document.getElementById('dropdown-username');
     if (dropdownUsername) dropdownUsername.textContent = '@' + currentUser.username;
+  }
+
+  function showGuestLoginHint() {
+    var hintBtn = document.getElementById('guest-login-hint');
+    if (!hintBtn) {
+      var statsPanel = document.getElementById('stats-panel');
+      if (statsPanel) {
+        var div = document.createElement('div');
+        div.id = 'guest-login-hint';
+        div.style.cssText = 'background:linear-gradient(135deg, rgba(0,255,200,0.15), rgba(139,92,246,0.15));border:1px solid var(--cyan);border-radius:10px;padding:10px 14px;margin-bottom:12px;cursor:pointer;text-align:center;';
+        div.innerHTML = '<span style="color:var(--cyan);font-weight:600;font-size:0.85rem;">🔐 点击登录/注册，永久保存您的足迹</span>';
+        div.addEventListener('click', function () {
+          showAuthPage();
+        });
+        statsPanel.insertBefore(div, statsPanel.firstChild);
+      }
+    }
+  }
+
+  function removeGuestLoginHint() {
+    var hintBtn = document.getElementById('guest-login-hint');
+    if (hintBtn) hintBtn.remove();
   }
 
   function initAuthEvents() {
@@ -211,8 +243,17 @@
           }
           setToken(data.token, remember);
           currentUser = data.user;
-          showAppPage();
-          initApp();
+          removeGuestLoginHint();
+          showAppPage(false);
+          if (appInitialized) {
+            clearAllMarkers();
+            footprintsCache = [];
+            tripsCache = [];
+            loadFootprints();
+            loadTrips();
+          } else {
+            initApp(false);
+          }
         })
         .catch(function (err) {
           errorEl.textContent = '登录失败，请重试';
@@ -245,8 +286,17 @@
           }
           setToken(data.token, true);
           currentUser = data.user;
-          showAppPage();
-          initApp();
+          removeGuestLoginHint();
+          showAppPage(false);
+          if (appInitialized) {
+            clearAllMarkers();
+            footprintsCache = [];
+            tripsCache = [];
+            loadFootprints();
+            loadTrips();
+          } else {
+            initApp(false);
+          }
         })
         .catch(function (err) {
           errorEl.textContent = '注册失败，请重试';
@@ -306,11 +356,7 @@
     if (btnLogout) {
       btnLogout.addEventListener('click', function () {
         clearAuth();
-        for (var id in markers) {
-          if (markers.hasOwnProperty(id)) {
-            map.removeLayer(markers[id]);
-          }
-        }
+        clearAllMarkers();
         markers = {};
         footprintsCache = [];
         tripsCache = [];
@@ -318,7 +364,22 @@
         pendingLatLng = null;
         pendingFiles = [];
         if (userDropdown) userDropdown.classList.add('hidden');
-        showAuthPage();
+        var modalIds = ['profile-modal', 'password-modal', 'add-modal', 'detail-modal', 'trip-form-modal'];
+        modalIds.forEach(function (id) { var el = document.getElementById(id); if (el) el.classList.add('hidden'); });
+        var drawerIds = ['trip-detail-drawer', 'timeline-drawer', 'trips-drawer'];
+        drawerIds.forEach(function (id) { var el = document.getElementById(id); if (el) el.classList.add('closed'); });
+        var statsDet = document.getElementById('stats-detailed');
+        if (statsDet) statsDet.classList.add('hidden');
+        var rac = document.getElementById('route-animation-controls');
+        if (rac) rac.classList.add('hidden');
+        if (typeof clearRoute === 'function') clearRoute();
+        if (typeof stopAnimation === 'function') stopAnimation();
+        appInitialized = false;
+        renderEmptyTimeline();
+        renderEmptyTripList();
+        loadStatsEmpty();
+        showAppPage(true);
+        appInitialized = true;
       });
     }
 
@@ -503,7 +564,8 @@
   function checkAuth() {
     var token = getToken();
     if (!token) {
-      showAuthPage();
+      showAppPage(true);
+      initApp(true);
       return;
     }
     authToken = token;
@@ -511,7 +573,8 @@
       .then(function (res) {
         if (!res.ok) {
           clearAuth();
-          showAuthPage();
+          showAppPage(true);
+          initApp(true);
           return null;
         }
         return res.json();
@@ -519,23 +582,75 @@
       .then(function (user) {
         if (user) {
           currentUser = user;
-          showAppPage();
-          initApp();
+          removeGuestLoginHint();
+          showAppPage(false);
+          initApp(false);
         }
       })
       .catch(function (err) {
         clearAuth();
-        showAuthPage();
+        showAppPage(true);
+        initApp(true);
       });
   }
 
-  function initApp() {
+  function initApp(isGuest) {
     if (appInitialized) return;
     appInitialized = true;
     initMap();
     bindEvents();
-    loadFootprints();
-    loadTrips();
+    if (!isGuest) {
+      loadFootprints();
+      loadTrips();
+    } else {
+      renderEmptyTimeline();
+      renderEmptyTripList();
+      loadStatsEmpty();
+    }
+  }
+
+  function renderEmptyTimeline() {
+    var list = document.getElementById('timeline-list');
+    if (list) {
+      list.innerHTML = '<div class="empty-timeline">' +
+        '<div class="empty-icon">🌍</div>' +
+        '<p>游客模式<br><a href="#" id="guest-login-link" style="color:var(--cyan);text-decoration:none;cursor:pointer;">点击登录</a>后可永久保存足迹</p>' +
+        '</div>';
+      var link = document.getElementById('guest-login-link');
+      if (link) {
+        link.addEventListener('click', function (e) {
+          e.preventDefault();
+          showAuthPage();
+        });
+      }
+    }
+  }
+
+  function renderEmptyTripList() {
+    var list = document.getElementById('trips-list');
+    if (list) {
+      list.innerHTML = '<div class="empty-timeline">' +
+        '<div class="empty-icon">✈️</div>' +
+        '<p>还没有旅行<br>登录后点击「新建旅行」开始记录吧</p>' +
+        '</div>';
+    }
+  }
+
+  function loadStatsEmpty() {
+    var statsTotal = document.getElementById('stat-total');
+    if (statsTotal) statsTotal.textContent = '0';
+    var statsCountries = document.getElementById('stat-countries');
+    if (statsCountries) statsCountries.textContent = '0';
+    var statsCities = document.getElementById('stat-cities');
+    if (statsCities) statsCities.textContent = '0';
+    var statsDays = document.getElementById('stat-days');
+    if (statsDays) statsDays.textContent = '0';
+    var statsProvinces = document.getElementById('stat-provinces');
+    if (statsProvinces) statsProvinces.textContent = '0';
+    var statsMonth = document.getElementById('stat-month');
+    if (statsMonth) statsMonth.textContent = '暂无';
+    var statsDistance = document.getElementById('stat-distance');
+    if (statsDistance) statsDistance.textContent = '0';
   }
 
   function initMap() {
@@ -556,6 +671,11 @@
   }
 
   function onMapClick(e) {
+    if (!currentUser) {
+      alert('请先登录后再添加足迹');
+      showAuthPage();
+      return;
+    }
     pendingLatLng = e.latlng;
     openAddModal();
   }
@@ -919,6 +1039,15 @@
     });
 
     markers[fp.id] = marker;
+  }
+
+  function clearAllMarkers() {
+    for (var id in markers) {
+      if (markers.hasOwnProperty(id)) {
+        if (map) map.removeLayer(markers[id]);
+        delete markers[id];
+      }
+    }
   }
 
   function fetchFootprintById(id) {
