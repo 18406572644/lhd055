@@ -1,5 +1,5 @@
 (function () {
-  const MOOD_COLORS = {
+  var MOOD_COLORS = {
     1: '#ef4444',
     2: '#f97316',
     3: '#eab308',
@@ -7,7 +7,7 @@
     5: '#22c55e'
   };
 
-  const MOOD_LABELS = {
+  var MOOD_LABELS = {
     1: '很差',
     2: '一般',
     3: '还行',
@@ -15,25 +15,523 @@
     5: '超棒'
   };
 
-  let map;
-  let markers = {};
-  let currentMood = 3;
-  let pendingLatLng = null;
-  let currentDetailId = null;
-  let footprintsCache = [];
-  let pendingFiles = [];
-  let lightboxImages = [];
-  let lightboxIndex = 0;
+  var map;
+  var markers = {};
+  var currentMood = 3;
+  var pendingLatLng = null;
+  var currentDetailId = null;
+  var footprintsCache = [];
+  var pendingFiles = [];
+  var lightboxImages = [];
+  var lightboxIndex = 0;
 
-  let tripsCache = [];
-  let currentTripId = null;
-  let editingTripId = null;
-  let routePolyline = null;
-  let routeAnimationMarker = null;
-  let animationState = { playing: false, progress: 0, speed: 1, tripFootprints: [], rafId: null };
-  let timelineMode = 'all';
+  var tripsCache = [];
+  var currentTripId = null;
+  var editingTripId = null;
+  var routePolyline = null;
+  var routeAnimationMarker = null;
+  var animationState = { playing: false, progress: 0, speed: 1, tripFootprints: [], rafId: null };
+  var timelineMode = 'all';
 
-  function init() {
+  var authToken = null;
+  var currentUser = null;
+  var appInitialized = false;
+
+  function getToken() {
+    return localStorage.getItem('authToken') || sessionStorage.getItem('authToken') || null;
+  }
+
+  function setToken(token, remember) {
+    authToken = token;
+    if (remember) {
+      localStorage.setItem('authToken', token);
+      sessionStorage.removeItem('authToken');
+    } else {
+      sessionStorage.setItem('authToken', token);
+      localStorage.removeItem('authToken');
+    }
+  }
+
+  function clearAuth() {
+    authToken = null;
+    currentUser = null;
+    localStorage.removeItem('authToken');
+    sessionStorage.removeItem('authToken');
+  }
+
+  function authFetch(url, options) {
+    options = options || {};
+    var headers = options.headers || {};
+    if (authToken) {
+      headers['Authorization'] = 'Bearer ' + authToken;
+    }
+    options.headers = headers;
+    return fetch(url, options).then(function (res) {
+      if (res.status === 401) {
+        clearAuth();
+        showAuthPage();
+        return res;
+      }
+      return res;
+    });
+  }
+
+  function showAuthPage() {
+    document.getElementById('auth-page').style.display = '';
+    document.getElementById('map').style.display = 'none';
+    document.getElementById('stats-panel').style.display = 'none';
+    var userBtn = document.getElementById('user-menu-btn');
+    if (userBtn) userBtn.style.display = 'none';
+    var tripsToggle = document.getElementById('trips-toggle');
+    if (tripsToggle) tripsToggle.style.display = 'none';
+    var timelineToggle = document.getElementById('timeline-toggle');
+    if (timelineToggle) timelineToggle.style.display = 'none';
+    var animationControls = document.getElementById('route-animation-controls');
+    if (animationControls) animationControls.classList.add('hidden');
+  }
+
+  function showAppPage() {
+    document.getElementById('auth-page').style.display = 'none';
+    document.getElementById('map').style.display = '';
+    document.getElementById('stats-panel').style.display = '';
+    var userBtn = document.getElementById('user-menu-btn');
+    if (userBtn) userBtn.style.display = '';
+    var tripsToggle = document.getElementById('trips-toggle');
+    if (tripsToggle) tripsToggle.style.display = '';
+    var timelineToggle = document.getElementById('timeline-toggle');
+    if (timelineToggle) timelineToggle.style.display = '';
+    updateUserUI();
+  }
+
+  function updateUserUI() {
+    if (!currentUser) return;
+    var nickname = currentUser.nickname || currentUser.username;
+    var avatar = currentUser.avatar || '';
+
+    var avatarSmall = document.getElementById('user-avatar-small');
+    if (avatarSmall) {
+      if (avatar) {
+        avatarSmall.innerHTML = '<img src="' + escapeHtml(avatar) + '" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">';
+      } else {
+        avatarSmall.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>';
+      }
+    }
+
+    var dropdownAvatar = document.getElementById('dropdown-avatar');
+    if (dropdownAvatar) {
+      if (avatar) {
+        dropdownAvatar.innerHTML = '<img src="' + escapeHtml(avatar) + '" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">';
+      } else {
+        dropdownAvatar.innerHTML = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>';
+      }
+    }
+
+    var dropdownNickname = document.getElementById('dropdown-nickname');
+    if (dropdownNickname) dropdownNickname.textContent = nickname;
+
+    var dropdownUsername = document.getElementById('dropdown-username');
+    if (dropdownUsername) dropdownUsername.textContent = '@' + currentUser.username;
+  }
+
+  function initAuthEvents() {
+    var authTabs = document.querySelectorAll('.auth-tab');
+    var loginForm = document.getElementById('login-form');
+    var registerForm = document.getElementById('register-form');
+    var forgotForm = document.getElementById('forgot-form');
+
+    function showAuthTab(tabName) {
+      authTabs.forEach(function (tab) {
+        if (tab.getAttribute('data-tab') === tabName) {
+          tab.classList.add('active');
+        } else {
+          tab.classList.remove('active');
+        }
+      });
+      loginForm.classList.toggle('hidden', tabName !== 'login');
+      registerForm.classList.toggle('hidden', tabName !== 'register');
+      forgotForm.classList.toggle('hidden', tabName !== 'forgot');
+    }
+
+    authTabs.forEach(function (tab) {
+      tab.addEventListener('click', function () {
+        showAuthTab(tab.getAttribute('data-tab'));
+      });
+    });
+
+    var toRegister = document.getElementById('to-register');
+    if (toRegister) {
+      toRegister.addEventListener('click', function (e) {
+        e.preventDefault();
+        showAuthTab('register');
+      });
+    }
+
+    var toLogin = document.getElementById('to-login');
+    if (toLogin) {
+      toLogin.addEventListener('click', function (e) {
+        e.preventDefault();
+        showAuthTab('login');
+      });
+    }
+
+    var forgotLink = document.getElementById('forgot-password-link');
+    if (forgotLink) {
+      forgotLink.addEventListener('click', function (e) {
+        e.preventDefault();
+        showAuthTab('forgot');
+      });
+    }
+
+    var backToLogin = document.getElementById('back-to-login');
+    if (backToLogin) {
+      backToLogin.addEventListener('click', function (e) {
+        e.preventDefault();
+        showAuthTab('login');
+      });
+    }
+
+    loginForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var username = document.getElementById('login-username').value.trim();
+      var password = document.getElementById('login-password').value;
+      var remember = document.getElementById('remember-me').checked;
+      var errorEl = document.getElementById('login-error');
+      errorEl.textContent = '';
+
+      fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: username, password: password })
+      })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+          if (data.error) {
+            errorEl.textContent = data.error;
+            return;
+          }
+          setToken(data.token, remember);
+          currentUser = data.user;
+          showAppPage();
+          initApp();
+        })
+        .catch(function (err) {
+          errorEl.textContent = '登录失败，请重试';
+        });
+    });
+
+    registerForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var username = document.getElementById('reg-username').value.trim();
+      var password = document.getElementById('reg-password').value;
+      var password2 = document.getElementById('reg-password2').value;
+      var errorEl = document.getElementById('register-error');
+      errorEl.textContent = '';
+
+      if (password !== password2) {
+        errorEl.textContent = '两次输入的密码不一致';
+        return;
+      }
+
+      fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: username, password: password })
+      })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+          if (data.error) {
+            errorEl.textContent = data.error;
+            return;
+          }
+          setToken(data.token, true);
+          currentUser = data.user;
+          showAppPage();
+          initApp();
+        })
+        .catch(function (err) {
+          errorEl.textContent = '注册失败，请重试';
+        });
+    });
+
+    forgotForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var username = document.getElementById('forgot-username').value.trim();
+      var newPassword = document.getElementById('forgot-new-password').value;
+      var newPassword2 = document.getElementById('forgot-new-password2').value;
+      var errorEl = document.getElementById('forgot-error');
+      errorEl.textContent = '';
+
+      if (newPassword !== newPassword2) {
+        errorEl.textContent = '两次输入的新密码不一致';
+        return;
+      }
+
+      fetch('/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: username, newPassword: newPassword })
+      })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+          if (data.error) {
+            errorEl.textContent = data.error;
+            return;
+          }
+          errorEl.textContent = '';
+          alert('密码重置成功，请登录');
+          showAuthTab('login');
+        })
+        .catch(function (err) {
+          errorEl.textContent = '重置失败，请重试';
+        });
+    });
+
+    var userMenuBtn = document.getElementById('user-menu-btn');
+    var userDropdown = document.getElementById('user-dropdown');
+    if (userMenuBtn) {
+      userMenuBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        userDropdown.classList.toggle('hidden');
+      });
+    }
+    document.addEventListener('click', function (e) {
+      if (userDropdown && !userDropdown.classList.contains('hidden')) {
+        if (!userDropdown.contains(e.target) && e.target !== userMenuBtn) {
+          userDropdown.classList.add('hidden');
+        }
+      }
+    });
+
+    var btnLogout = document.getElementById('btn-logout');
+    if (btnLogout) {
+      btnLogout.addEventListener('click', function () {
+        clearAuth();
+        for (var id in markers) {
+          if (markers.hasOwnProperty(id)) {
+            map.removeLayer(markers[id]);
+          }
+        }
+        markers = {};
+        footprintsCache = [];
+        tripsCache = [];
+        currentDetailId = null;
+        pendingLatLng = null;
+        pendingFiles = [];
+        if (userDropdown) userDropdown.classList.add('hidden');
+        showAuthPage();
+      });
+    }
+
+    var btnProfile = document.getElementById('btn-profile');
+    if (btnProfile) {
+      btnProfile.addEventListener('click', function () {
+        if (userDropdown) userDropdown.classList.add('hidden');
+        openProfileModal();
+      });
+    }
+
+    var btnChangePassword = document.getElementById('btn-change-password');
+    if (btnChangePassword) {
+      btnChangePassword.addEventListener('click', function () {
+        if (userDropdown) userDropdown.classList.add('hidden');
+        openPasswordModal();
+      });
+    }
+
+    var profileCancel = document.getElementById('profile-cancel');
+    if (profileCancel) {
+      profileCancel.addEventListener('click', function () {
+        document.getElementById('profile-modal').classList.add('hidden');
+      });
+    }
+
+    var profileModal = document.getElementById('profile-modal');
+    if (profileModal) {
+      profileModal.querySelectorAll('.modal-backdrop').forEach(function (el) {
+        el.addEventListener('click', function () {
+          profileModal.classList.add('hidden');
+        });
+      });
+    }
+
+    var profileForm = document.getElementById('profile-form');
+    if (profileForm) {
+      profileForm.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var nickname = document.getElementById('profile-nickname').value.trim();
+        var bio = document.getElementById('profile-bio').value.trim();
+
+        authFetch('/api/auth/profile', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nickname: nickname, bio: bio })
+        })
+          .then(function (res) { return res.json(); })
+          .then(function (data) {
+            if (data.error) {
+              alert(data.error);
+              return;
+            }
+            currentUser = data;
+            updateUserUI();
+            document.getElementById('profile-modal').classList.add('hidden');
+          })
+          .catch(function (err) {
+            console.error('Failed to update profile:', err);
+          });
+      });
+    }
+
+    var btnChangeAvatar = document.getElementById('btn-change-avatar');
+    var avatarInput = document.getElementById('avatar-input');
+    if (btnChangeAvatar && avatarInput) {
+      btnChangeAvatar.addEventListener('click', function () {
+        avatarInput.click();
+      });
+      avatarInput.addEventListener('change', function (e) {
+        if (e.target.files && e.target.files.length > 0) {
+          var formData = new FormData();
+          formData.append('avatar', e.target.files[0]);
+          authFetch('/api/auth/avatar', {
+            method: 'POST',
+            body: formData
+          })
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+              if (data.error) {
+                alert(data.error);
+                return;
+              }
+              if (currentUser) {
+                currentUser.avatar = data.avatar;
+              }
+              updateUserUI();
+              var preview = document.getElementById('profile-avatar-preview');
+              if (preview) {
+                preview.innerHTML = '<img src="' + escapeHtml(data.avatar) + '" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">';
+              }
+            })
+            .catch(function (err) {
+              console.error('Failed to upload avatar:', err);
+            });
+          avatarInput.value = '';
+        }
+      });
+    }
+
+    var passwordCancel = document.getElementById('password-cancel');
+    if (passwordCancel) {
+      passwordCancel.addEventListener('click', function () {
+        document.getElementById('password-modal').classList.add('hidden');
+      });
+    }
+
+    var passwordModal = document.getElementById('password-modal');
+    if (passwordModal) {
+      passwordModal.querySelectorAll('.modal-backdrop').forEach(function (el) {
+        el.addEventListener('click', function () {
+          passwordModal.classList.add('hidden');
+        });
+      });
+    }
+
+    var passwordForm = document.getElementById('password-form');
+    if (passwordForm) {
+      passwordForm.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var oldPassword = document.getElementById('old-password').value;
+        var newPassword = document.getElementById('new-password').value;
+        var confirmPassword = document.getElementById('confirm-password').value;
+        var errorEl = document.getElementById('password-error');
+        errorEl.textContent = '';
+
+        if (newPassword !== confirmPassword) {
+          errorEl.textContent = '两次输入的新密码不一致';
+          return;
+        }
+
+        authFetch('/api/auth/password', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ oldPassword: oldPassword, newPassword: newPassword })
+        })
+          .then(function (res) { return res.json(); })
+          .then(function (data) {
+            if (data.error) {
+              errorEl.textContent = data.error;
+              return;
+            }
+            document.getElementById('password-modal').classList.add('hidden');
+            alert('密码修改成功');
+            document.getElementById('old-password').value = '';
+            document.getElementById('new-password').value = '';
+            document.getElementById('confirm-password').value = '';
+          })
+          .catch(function (err) {
+            errorEl.textContent = '修改失败，请重试';
+          });
+      });
+    }
+  }
+
+  function openProfileModal() {
+    var modal = document.getElementById('profile-modal');
+    modal.classList.remove('hidden');
+    if (currentUser) {
+      document.getElementById('profile-nickname').value = currentUser.nickname || '';
+      document.getElementById('profile-bio').value = currentUser.bio || '';
+      var preview = document.getElementById('profile-avatar-preview');
+      if (preview) {
+        if (currentUser.avatar) {
+          preview.innerHTML = '<img src="' + escapeHtml(currentUser.avatar) + '" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">';
+        } else {
+          preview.innerHTML = '<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>';
+        }
+      }
+    }
+  }
+
+  function openPasswordModal() {
+    var modal = document.getElementById('password-modal');
+    modal.classList.remove('hidden');
+    document.getElementById('old-password').value = '';
+    document.getElementById('new-password').value = '';
+    document.getElementById('confirm-password').value = '';
+    document.getElementById('password-error').textContent = '';
+  }
+
+  function checkAuth() {
+    var token = getToken();
+    if (!token) {
+      showAuthPage();
+      return;
+    }
+    authToken = token;
+    authFetch('/api/auth/me')
+      .then(function (res) {
+        if (!res.ok) {
+          clearAuth();
+          showAuthPage();
+          return null;
+        }
+        return res.json();
+      })
+      .then(function (user) {
+        if (user) {
+          currentUser = user;
+          showAppPage();
+          initApp();
+        }
+      })
+      .catch(function (err) {
+        clearAuth();
+        showAuthPage();
+      });
+  }
+
+  function initApp() {
+    if (appInitialized) return;
+    appInitialized = true;
     initMap();
     bindEvents();
     loadFootprints();
@@ -226,6 +724,20 @@
         closeLightbox();
       }
     });
+
+    document.getElementById('add-form').addEventListener('submit', function (e) {
+      e.preventDefault();
+      submitFootprint();
+    });
+
+    var addCancel = document.getElementById('add-cancel');
+    if (addCancel) {
+      addCancel.addEventListener('click', closeAddModal);
+    }
+
+    document.querySelectorAll('#add-modal .modal-backdrop').forEach(function (el) {
+      el.addEventListener('click', closeAddModal);
+    });
   }
 
   function setupUploadArea(areaId, inputId, onFiles) {
@@ -314,7 +826,7 @@
 
     if (!name || !date) return;
 
-    fetch('/api/footprints', {
+    authFetch('/api/footprints', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -356,7 +868,7 @@
     files.forEach(function (file) {
       formData.append('images', file);
     });
-    return fetch('/api/footprints/' + footprintId + '/images', {
+    return authFetch('/api/footprints/' + footprintId + '/images', {
       method: 'POST',
       body: formData
     })
@@ -410,7 +922,7 @@
   }
 
   function fetchFootprintById(id) {
-    return fetch('/api/footprints/' + id)
+    return authFetch('/api/footprints/' + id)
       .then(function (res) {
         if (!res.ok) throw new Error('Footprint not found');
         return res.json();
@@ -523,7 +1035,7 @@
   }
 
   function deleteFootprint(id) {
-    fetch('/api/footprints/' + id, { method: 'DELETE' })
+    authFetch('/api/footprints/' + id, { method: 'DELETE' })
       .then(function (res) {
         if (!res.ok) throw new Error('Delete failed');
         return res.json();
@@ -589,7 +1101,7 @@
     if (!img) return;
     if (!confirm('确定要删除这张图片吗？')) return;
 
-    fetch('/api/footprints/' + currentDetailId + '/images/' + img.id, {
+    authFetch('/api/footprints/' + currentDetailId + '/images/' + img.id, {
       method: 'DELETE'
     })
       .then(function (res) {
@@ -656,7 +1168,7 @@
   }
 
   function loadFootprints() {
-    fetch('/api/footprints')
+    authFetch('/api/footprints')
       .then(function (res) { return res.json(); })
       .then(function (footprints) {
         footprintsCache = footprints;
@@ -673,7 +1185,7 @@
 
   function loadTimeline() {
     if (timelineMode === 'byTrip') {
-      fetch('/api/trips')
+      authFetch('/api/trips')
         .then(function (res) { return res.json(); })
         .then(function (trips) {
           tripsCache = trips;
@@ -683,7 +1195,7 @@
           console.error('Failed to load timeline trips:', err);
         });
     } else {
-      fetch('/api/footprints')
+      authFetch('/api/footprints')
         .then(function (res) { return res.json(); })
         .then(function (footprints) {
           footprintsCache = footprints;
@@ -831,7 +1343,7 @@
   }
 
   function loadTripFootprintsForTimeline(tripId, container) {
-    fetch('/api/trips/' + tripId + '/footprints')
+    authFetch('/api/trips/' + tripId + '/footprints')
       .then(function (res) { return res.json(); })
       .then(function (footprints) {
         container.dataset.loaded = 'true';
@@ -1117,7 +1629,7 @@
   }
 
   function loadStats() {
-    fetch('/api/stats')
+    authFetch('/api/stats')
       .then(function (res) { return res.json(); })
       .then(function (stats) {
         window._lastStats = stats;
@@ -1146,7 +1658,7 @@
   }
 
   function loadTrips() {
-    fetch('/api/trips')
+    authFetch('/api/trips')
       .then(function (res) { return res.json(); })
       .then(function (trips) {
         tripsCache = trips;
@@ -1243,7 +1755,7 @@
       method = 'PUT';
     }
 
-    fetch(url, {
+    authFetch(url, {
       method: method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
@@ -1265,7 +1777,7 @@
     currentTripId = tripId;
     document.getElementById('trip-detail-drawer').classList.remove('closed');
 
-    fetch('/api/trips/' + tripId)
+    authFetch('/api/trips/' + tripId)
       .then(function (res) { return res.json(); })
       .then(function (trip) {
         if (currentTripId !== tripId) return;
@@ -1391,7 +1903,7 @@
   }
 
   function deleteTrip(tripId) {
-    fetch('/api/trips/' + tripId, { method: 'DELETE' })
+    authFetch('/api/trips/' + tripId, { method: 'DELETE' })
       .then(function (res) {
         if (!res.ok) throw new Error('Delete failed');
         return res.json();
@@ -1562,7 +2074,7 @@
   }
 
   function loadFootprintTrips(footprintId) {
-    return fetch('/api/footprints/' + footprintId + '/trips')
+    return authFetch('/api/footprints/' + footprintId + '/trips')
       .then(function (res) { return res.json(); })
       .catch(function (err) {
         console.error('Failed to load footprint trips:', err);
@@ -1571,7 +2083,7 @@
   }
 
   function addFootprintToTrip(tripId, footprintId) {
-    return fetch('/api/trips/' + tripId + '/footprints/' + footprintId, { method: 'POST' })
+    return authFetch('/api/trips/' + tripId + '/footprints/' + footprintId, { method: 'POST' })
       .then(function (res) { return res.json(); })
       .then(function (result) {
         if (result.success) {
@@ -1666,5 +2178,8 @@
     }, 50);
   };
 
-  document.addEventListener('DOMContentLoaded', init);
+  document.addEventListener('DOMContentLoaded', function () {
+    initAuthEvents();
+    checkAuth();
+  });
 })();

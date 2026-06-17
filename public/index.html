@@ -11,6 +11,84 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <div id="auth-page" class="auth-page">
+    <div class="auth-container">
+      <div class="auth-brand">
+        <div class="auth-logo">🌍</div>
+        <h1 class="auth-title">旅行足迹地图</h1>
+        <p class="auth-subtitle">记录你去过的每一个地方</p>
+      </div>
+      <div class="auth-form-wrapper">
+        <div class="auth-tabs">
+          <button class="auth-tab active" data-tab="login">登录</button>
+          <button class="auth-tab" data-tab="register">注册</button>
+        </div>
+        <form id="login-form" class="auth-form">
+          <div class="form-group">
+            <label for="login-username">用户名</label>
+            <input type="text" id="login-username" required placeholder="输入用户名" autocomplete="username">
+          </div>
+          <div class="form-group">
+            <label for="login-password">密码</label>
+            <input type="password" id="login-password" required placeholder="输入密码" autocomplete="current-password">
+          </div>
+          <div class="form-group remember-me">
+            <label class="checkbox-label">
+              <input type="checkbox" id="remember-me" checked>
+              <span>记住登录状态</span>
+            </label>
+          </div>
+          <div id="login-error" class="auth-error"></div>
+          <button type="submit" class="btn-auth">登 录</button>
+          <div class="auth-switch">
+            还没有账号？<a href="#" id="to-register">立即注册</a>
+          </div>
+          <div class="auth-forgot">
+            <a href="#" id="forgot-password-link">忘记密码？</a>
+          </div>
+        </form>
+        <form id="register-form" class="auth-form hidden">
+          <div class="form-group">
+            <label for="reg-username">用户名</label>
+            <input type="text" id="reg-username" required placeholder="3-20个字符" autocomplete="username">
+          </div>
+          <div class="form-group">
+            <label for="reg-password">密码</label>
+            <input type="password" id="reg-password" required placeholder="至少6个字符" autocomplete="new-password">
+          </div>
+          <div class="form-group">
+            <label for="reg-password2">确认密码</label>
+            <input type="password" id="reg-password2" required placeholder="再次输入密码" autocomplete="new-password">
+          </div>
+          <div id="register-error" class="auth-error"></div>
+          <button type="submit" class="btn-auth">注 册</button>
+          <div class="auth-switch">
+            已有账号？<a href="#" id="to-login">返回登录</a>
+          </div>
+        </form>
+        <form id="forgot-form" class="auth-form hidden">
+          <div class="form-group">
+            <label for="forgot-username">用户名</label>
+            <input type="text" id="forgot-username" required placeholder="输入注册时的用户名">
+          </div>
+          <div class="form-group">
+            <label for="forgot-new-password">新密码</label>
+            <input type="password" id="forgot-new-password" required placeholder="至少6个字符">
+          </div>
+          <div class="form-group">
+            <label for="forgot-new-password2">确认新密码</label>
+            <input type="password" id="forgot-new-password2" required placeholder="再次输入新密码">
+          </div>
+          <div id="forgot-error" class="auth-error"></div>
+          <button type="submit" class="btn-auth">重置密码</button>
+          <div class="auth-switch">
+            <a href="#" id="back-to-login">返回登录</a>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
   <div id="map"></div>
 
   <div id="stats-panel" class="collapsed">
@@ -72,6 +150,98 @@
         <h3>年度对比</h3>
         <div class="yearly-card" id="yearly-card"></div>
       </div>
+    </div>
+  </div>
+
+  <div id="user-menu-btn" title="用户菜单">
+    <div id="user-avatar-small" class="user-avatar-small">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+        <circle cx="12" cy="7" r="4"/>
+      </svg>
+    </div>
+  </div>
+
+  <div id="user-dropdown" class="user-dropdown hidden">
+    <div class="user-dropdown-header">
+      <div id="dropdown-avatar" class="dropdown-avatar">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+          <circle cx="12" cy="7" r="4"/>
+        </svg>
+      </div>
+      <div class="dropdown-user-info">
+        <div id="dropdown-nickname" class="dropdown-nickname"></div>
+        <div id="dropdown-username" class="dropdown-username"></div>
+      </div>
+    </div>
+    <div class="user-dropdown-divider"></div>
+    <button id="btn-profile" class="dropdown-item">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      个人资料
+    </button>
+    <button id="btn-change-password" class="dropdown-item">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      修改密码
+    </button>
+    <div class="user-dropdown-divider"></div>
+    <button id="btn-logout" class="dropdown-item danger">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      退出登录
+    </button>
+  </div>
+
+  <div id="profile-modal" class="hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content profile-modal-content">
+      <h3>个人资料</h3>
+      <div class="profile-avatar-section">
+        <div id="profile-avatar-preview" class="profile-avatar-preview">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        </div>
+        <button id="btn-change-avatar" class="btn-small">更换头像</button>
+        <input type="file" id="avatar-input" accept="image/*" hidden>
+      </div>
+      <form id="profile-form">
+        <div class="form-group">
+          <label for="profile-nickname">昵称</label>
+          <input type="text" id="profile-nickname" placeholder="输入昵称">
+        </div>
+        <div class="form-group">
+          <label for="profile-bio">个人简介</label>
+          <textarea id="profile-bio" rows="3" placeholder="介绍一下自己..."></textarea>
+        </div>
+        <div class="form-actions">
+          <button type="button" id="profile-cancel" class="btn-cancel">取消</button>
+          <button type="submit" class="btn-submit">保存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="password-modal" class="hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content">
+      <h3>修改密码</h3>
+      <form id="password-form">
+        <div class="form-group">
+          <label for="old-password">旧密码</label>
+          <input type="password" id="old-password" required placeholder="输入旧密码" autocomplete="current-password">
+        </div>
+        <div class="form-group">
+          <label for="new-password">新密码</label>
+          <input type="password" id="new-password" required placeholder="至少6个字符" autocomplete="new-password">
+        </div>
+        <div class="form-group">
+          <label for="confirm-password">确认新密码</label>
+          <input type="password" id="confirm-password" required placeholder="再次输入新密码" autocomplete="new-password">
+        </div>
+        <div id="password-error" class="auth-error"></div>
+        <div class="form-actions">
+          <button type="button" id="password-cancel" class="btn-cancel">取消</button>
+          <button type="submit" class="btn-submit">修改密码</button>
+        </div>
+      </form>
     </div>
   </div>
 

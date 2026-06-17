@@ -1,20 +1,36 @@
 const Database = require('better-sqlite3');
 const path = require('path');
+const bcrypt = require('bcryptjs');
 
 const db = new Database(path.join(__dirname, 'footprints.db'));
 
 db.pragma('journal_mode = WAL');
+db.pragma('foreign_keys = ON');
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    password TEXT NOT NULL,
+    nickname TEXT DEFAULT '',
+    avatar TEXT DEFAULT '',
+    bio TEXT DEFAULT '',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )
+`);
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS footprints (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
     name TEXT NOT NULL,
     date TEXT NOT NULL,
     feeling TEXT DEFAULT '',
     mood INTEGER DEFAULT 3 CHECK(mood BETWEEN 1 AND 5),
     lat REAL NOT NULL,
     lng REAL NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   )
 `);
 
@@ -37,12 +53,14 @@ db.exec(`
 db.exec(`
   CREATE TABLE IF NOT EXISTS trips (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
     name TEXT NOT NULL,
     description TEXT DEFAULT '',
     start_date TEXT,
     end_date TEXT,
     cover_image TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   )
 `);
 
@@ -59,16 +77,38 @@ db.exec(`
   )
 `);
 
-const stmtGetAll = db.prepare('SELECT * FROM footprints ORDER BY date DESC, created_at DESC');
-const stmtGetById = db.prepare('SELECT * FROM footprints WHERE id = ?');
-const stmtInsert = db.prepare('INSERT INTO footprints (name, date, feeling, mood, lat, lng) VALUES (@name, @date, @feeling, @mood, @lat, @lng)');
-const stmtDelete = db.prepare('DELETE FROM footprints WHERE id = ?');
-const stmtCount = db.prepare('SELECT COUNT(*) as total FROM footprints');
-const stmtDistinctCities = db.prepare('SELECT COUNT(DISTINCT name) as cities FROM footprints');
-const stmtDistinctDates = db.prepare('SELECT COUNT(DISTINCT date) as days FROM footprints');
+function columnExists(tableName, columnName) {
+  const rows = db.pragma('table_info(' + tableName + ')');
+  return rows.some(function (row) { return row.name === columnName; });
+}
+
+if (!columnExists('footprints', 'user_id')) {
+  db.exec('ALTER TABLE footprints ADD COLUMN user_id INTEGER NOT NULL DEFAULT 1');
+}
+
+if (!columnExists('trips', 'user_id')) {
+  db.exec('ALTER TABLE trips ADD COLUMN user_id INTEGER NOT NULL DEFAULT 1');
+}
+
+const userCols = 'id, username, nickname, avatar, bio, created_at';
+const stmtGetUserByUsername = db.prepare('SELECT * FROM users WHERE username = ?');
+const stmtGetUserById = db.prepare('SELECT ' + userCols + ' FROM users WHERE id = ?');
+const stmtInsertUser = db.prepare('INSERT INTO users (username, password, nickname) VALUES (@username, @password, @nickname)');
+const stmtUpdateUserProfile = db.prepare('UPDATE users SET nickname = @nickname, avatar = @avatar, bio = @bio WHERE id = @id');
+const stmtUpdateUserPassword = db.prepare('UPDATE users SET password = @password WHERE id = @id');
+
+const stmtGetAll = db.prepare('SELECT * FROM footprints WHERE user_id = ? ORDER BY date DESC, created_at DESC');
+const stmtGetById = db.prepare('SELECT * FROM footprints WHERE id = ? AND user_id = ?');
+const stmtGetByIdNoUser = db.prepare('SELECT * FROM footprints WHERE id = ?');
+const stmtInsert = db.prepare('INSERT INTO footprints (user_id, name, date, feeling, mood, lat, lng) VALUES (@user_id, @name, @date, @feeling, @mood, @lat, @lng)');
+const stmtDelete = db.prepare('DELETE FROM footprints WHERE id = ? AND user_id = ?');
+const stmtCount = db.prepare('SELECT COUNT(*) as total FROM footprints WHERE user_id = ?');
+const stmtDistinctCities = db.prepare('SELECT COUNT(DISTINCT name) as cities FROM footprints WHERE user_id = ?');
+const stmtDistinctDates = db.prepare('SELECT COUNT(DISTINCT date) as days FROM footprints WHERE user_id = ?');
 const stmtFavoriteMonth = db.prepare(`
   SELECT strftime('%m', date) as month, COUNT(*) as cnt
   FROM footprints
+  WHERE user_id = ?
   GROUP BY month
   ORDER BY cnt DESC
   LIMIT 1
@@ -76,12 +116,14 @@ const stmtFavoriteMonth = db.prepare(`
 const stmtMoodDistribution = db.prepare(`
   SELECT mood, COUNT(*) as cnt
   FROM footprints
+  WHERE user_id = ?
   GROUP BY mood
   ORDER BY mood ASC
 `);
 const stmtMonthlyTrend = db.prepare(`
   SELECT strftime('%Y-%m', date) as month, COUNT(*) as cnt
   FROM footprints
+  WHERE user_id = ?
   GROUP BY month
   ORDER BY month ASC
 `);
@@ -92,16 +134,17 @@ const stmtYearlyData = db.prepare(`
     COUNT(DISTINCT date) as days,
     COUNT(DISTINCT name) as cities
   FROM footprints
-  WHERE strftime('%Y', date) IN (?, ?)
+  WHERE user_id = ? AND strftime('%Y', date) IN (?, ?)
   GROUP BY year
   ORDER BY year DESC
 `);
 
-const stmtGetAllTrips = db.prepare('SELECT * FROM trips ORDER BY start_date DESC, created_at DESC');
-const stmtGetTripById = db.prepare('SELECT * FROM trips WHERE id = ?');
-const stmtInsertTrip = db.prepare('INSERT INTO trips (name, description, start_date, end_date, cover_image) VALUES (@name, @description, @start_date, @end_date, @cover_image)');
-const stmtUpdateTrip = db.prepare('UPDATE trips SET name = @name, description = @description, start_date = @start_date, end_date = @end_date, cover_image = @cover_image WHERE id = @id');
-const stmtDeleteTrip = db.prepare('DELETE FROM trips WHERE id = ?');
+const stmtGetAllTrips = db.prepare('SELECT * FROM trips WHERE user_id = ? ORDER BY start_date DESC, created_at DESC');
+const stmtGetTripById = db.prepare('SELECT * FROM trips WHERE id = ? AND user_id = ?');
+const stmtGetTripByIdNoUser = db.prepare('SELECT * FROM trips WHERE id = ?');
+const stmtInsertTrip = db.prepare('INSERT INTO trips (user_id, name, description, start_date, end_date, cover_image) VALUES (@user_id, @name, @description, @start_date, @end_date, @cover_image)');
+const stmtUpdateTrip = db.prepare('UPDATE trips SET name = @name, description = @description, start_date = @start_date, end_date = @end_date, cover_image = @cover_image WHERE id = @id AND user_id = @user_id');
+const stmtDeleteTrip = db.prepare('DELETE FROM trips WHERE id = ? AND user_id = ?');
 
 const stmtGetTripFootprints = db.prepare(`
   SELECT f.* FROM footprints f
@@ -133,21 +176,63 @@ const stmtInsertImage = db.prepare(`
 const stmtDeleteImage = db.prepare('DELETE FROM footprint_images WHERE id = ?');
 const stmtDeleteImagesByFootprintId = db.prepare('DELETE FROM footprint_images WHERE footprint_id = ?');
 
-function getAll() {
-  return stmtGetAll.all();
+function createUser(username, plainPassword) {
+  const hashed = bcrypt.hashSync(plainPassword, 10);
+  const result = stmtInsertUser.run({
+    username,
+    password: hashed,
+    nickname: username
+  });
+  return stmtGetUserById.get(result.lastInsertRowid);
 }
 
-function getById(id) {
-  return stmtGetById.get(id);
+function getUserByUsername(username) {
+  return stmtGetUserByUsername.get(username);
+}
+
+function getUserById(id) {
+  return stmtGetUserById.get(id);
+}
+
+function verifyPassword(plainPassword, hashedPassword) {
+  return bcrypt.compareSync(plainPassword, hashedPassword);
+}
+
+function updateUserProfile(id, data) {
+  stmtUpdateUserProfile.run({
+    id,
+    nickname: data.nickname || '',
+    avatar: data.avatar || '',
+    bio: data.bio || ''
+  });
+  return stmtGetUserById.get(id);
+}
+
+function updateUserPassword(id, plainPassword) {
+  const hashed = bcrypt.hashSync(plainPassword, 10);
+  stmtUpdateUserPassword.run({ id, password: hashed });
+  return stmtGetUserById.get(id);
+}
+
+function getAll(userId) {
+  return stmtGetAll.all(userId);
+}
+
+function getById(id, userId) {
+  return stmtGetById.get(id, userId);
+}
+
+function getByIdNoUser(id) {
+  return stmtGetByIdNoUser.get(id);
 }
 
 function create(data) {
   const result = stmtInsert.run(data);
-  return stmtGetById.get(result.lastInsertRowid);
+  return stmtGetByIdNoUser.get(result.lastInsertRowid);
 }
 
-function remove(id) {
-  return stmtDelete.run(id);
+function remove(id, userId) {
+  return stmtDelete.run(id, userId);
 }
 
 function haversineDistance(lat1, lng1, lat2, lng2) {
@@ -235,27 +320,27 @@ function parseRegions(names) {
   };
 }
 
-function getStats() {
-  const total = stmtCount.get().total;
-  const cities = stmtDistinctCities.get().cities;
-  const travelDays = stmtDistinctDates.get().days;
-  const favRow = stmtFavoriteMonth.get();
+function getStats(userId) {
+  const total = stmtCount.get(userId).total;
+  const cities = stmtDistinctCities.get(userId).cities;
+  const travelDays = stmtDistinctDates.get(userId).days;
+  const favRow = stmtFavoriteMonth.get(userId);
   const monthNames = ['一月','二月','三月','四月','五月','六月','七月','八月','九月','十月','十一月','十二月'];
   const favoriteMonth = favRow ? monthNames[parseInt(favRow.month, 10) - 1] : '暂无';
 
-  const moodRows = stmtMoodDistribution.all();
+  const moodRows = stmtMoodDistribution.all(userId);
   const moodDistribution = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
   moodRows.forEach(row => {
     moodDistribution[row.mood] = row.cnt;
   });
 
-  const monthlyRows = stmtMonthlyTrend.all();
+  const monthlyRows = stmtMonthlyTrend.all(userId);
   const monthlyTrend = {};
   monthlyRows.forEach(row => {
     monthlyTrend[row.month] = row.cnt;
   });
 
-  const allFps = stmtGetAll.all();
+  const allFps = stmtGetAll.all(userId);
   const fpsForRegion = allFps.map(fp => fp.name || '');
   const regions = parseRegions(fpsForRegion);
 
@@ -273,7 +358,7 @@ function getStats() {
 
   const currentYear = new Date().getFullYear().toString();
   const lastYear = (new Date().getFullYear() - 1).toString();
-  const yearlyRows = stmtYearlyData.all(currentYear, lastYear);
+  const yearlyRows = stmtYearlyData.all(userId, currentYear, lastYear);
   const yearlyComparison = {};
   yearlyRows.forEach(row => {
     yearlyComparison[row.year] = {
@@ -324,45 +409,51 @@ function removeImagesByFootprint(footprintId) {
   return stmtDeleteImagesByFootprintId.run(footprintId);
 }
 
-function getAllTrips() {
-  const trips = stmtGetAllTrips.all();
+function getAllTrips(userId) {
+  const trips = stmtGetAllTrips.all(userId);
   return trips.map(trip => {
     const footprints = getTripFootprints(trip.id);
     return { ...trip, footprintCount: footprints.length };
   });
 }
 
-function getTripById(id) {
-  return stmtGetTripById.get(id);
+function getTripById(id, userId) {
+  return stmtGetTripById.get(id, userId);
+}
+
+function getTripByIdNoUser(id) {
+  return stmtGetTripByIdNoUser.get(id);
 }
 
 function createTrip(data) {
   const result = stmtInsertTrip.run({
+    user_id: data.user_id,
     name: data.name,
     description: data.description || '',
     start_date: data.start_date || null,
     end_date: data.end_date || null,
     cover_image: data.cover_image || null
   });
-  return stmtGetTripById.get(result.lastInsertRowid);
+  return stmtGetTripByIdNoUser.get(result.lastInsertRowid);
 }
 
 function updateTrip(id, data) {
-  const existing = stmtGetTripById.get(id);
+  const existing = stmtGetTripByIdNoUser.get(id);
   if (!existing) return null;
   stmtUpdateTrip.run({
     id,
+    user_id: data.user_id,
     name: data.name !== undefined ? data.name : existing.name,
     description: data.description !== undefined ? data.description : existing.description,
     start_date: data.start_date !== undefined ? data.start_date : existing.start_date,
     end_date: data.end_date !== undefined ? data.end_date : existing.end_date,
     cover_image: data.cover_image !== undefined ? data.cover_image : existing.cover_image
   });
-  return stmtGetTripById.get(id);
+  return stmtGetTripByIdNoUser.get(id);
 }
 
-function deleteTrip(id) {
-  return stmtDeleteTrip.run(id);
+function deleteTrip(id, userId) {
+  return stmtDeleteTrip.run(id, userId);
 }
 
 function getTripFootprints(tripId) {
@@ -389,7 +480,7 @@ function getTripsByFootprintId(footprintId) {
 
 function getTripStats(tripId) {
   const footprints = stmtGetTripFootprints.all(tripId);
-  const trip = stmtGetTripById.get(tripId);
+  const trip = stmtGetTripByIdNoUser.get(tripId);
 
   if (footprints.length === 0) {
     return {
@@ -433,7 +524,7 @@ function getTripStats(tripId) {
 
 function generateGPX(tripId) {
   const footprints = stmtGetTripFootprints.all(tripId);
-  const trip = stmtGetTripById.get(tripId);
+  const trip = stmtGetTripByIdNoUser.get(tripId);
 
   let gpx = '<?xml version="1.0" encoding="UTF-8"?>\n';
   gpx += '<gpx version="1.1" creator="Travel Footprint Map"\n';
@@ -483,9 +574,10 @@ function escapeXml(str) {
 }
 
 module.exports = {
-  getAll, getById, create, remove, getStats,
+  createUser, getUserByUsername, getUserById, verifyPassword, updateUserProfile, updateUserPassword,
+  getAll, getById, getByIdNoUser, create, remove, getStats,
   getImages, getImage, addImage, removeImage, removeImagesByFootprint,
-  getAllTrips, getTripById, createTrip, updateTrip, deleteTrip,
+  getAllTrips, getTripById, getTripByIdNoUser, createTrip, updateTrip, deleteTrip,
   getTripFootprints, addFootprintToTrip, removeFootprintFromTrip,
   getTripsByFootprintId, getTripStats, generateGPX
 };
